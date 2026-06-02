@@ -22,8 +22,10 @@ STANDARD_FOLDERS = [
     "Documentos Pessoais", "Rendimentos", "Extratos Bancários",
     "IRS", "Imóvel", "Mapa CRC", "RGPD", "Proposta Crédito",
 ]
-REQUIRED_CATEGORIES = {"Documentos Pessoais", "Rendimentos", "Mapa CRC", "RGPD"}
+REQUIRED_PER_PERSON = {"Documentos Pessoais", "Rendimentos", "Mapa CRC"}
+REQUIRED_SHARED     = {"RGPD"}
+REQUIRED_CATEGORIES = REQUIRED_PER_PERSON | REQUIRED_SHARED
 
-SKIP_NAMES = {".claude", "standby", "despesas valencia", "nova pasta", "_claude_review", "webapp"}
+SKIP_NAMES = {".claude", ".git", "standby", "despesas valencia", "nova pasta", "_claude_review", "webapp"}
 IMAGE_EXTS = {".jpg", ".jpeg", ".png"}
 DOC_EXTS   = {".pdf"} | IMAGE_EXTS

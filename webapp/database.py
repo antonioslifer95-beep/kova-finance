@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS documents (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     client_id    INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
     category     TEXT,
+    subclient    TEXT,
     filename     TEXT NOT NULL,
     rel_path     TEXT NOT NULL UNIQUE,
     abs_path     TEXT NOT NULL,
@@ -86,6 +87,11 @@ def init_db():
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(DB_PATH) as conn:
         conn.executescript(SCHEMA)
+        # Migrations for existing databases
+        try:
+            conn.execute("ALTER TABLE documents ADD COLUMN subclient TEXT")
+        except sqlite3.OperationalError:
+            pass  # column already exists
 
 @contextmanager
 def get_db():

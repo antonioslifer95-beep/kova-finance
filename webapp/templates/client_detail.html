@@ -29,7 +29,7 @@
   <div class="flex gap-6 h-[calc(100vh-10rem)]">
 
     <!-- Left: Document tree -->
-    <div class="w-72 flex-shrink-0 space-y-2 overflow-y-auto scrollbar-thin pr-1">
+    <div class="w-72 flex-shrink-0 space-y-1 overflow-y-auto scrollbar-thin pr-1">
       {% set cat_icons = {
         'Documentos Pessoais': '🪪',
         'Rendimentos': '💶',
@@ -41,36 +41,61 @@
         'Proposta Crédito': '📋',
         'Sem categoria': '❓',
       } %}
-      {% for cat, docs in groups.items() %}
-      <div x-data="{ open: '{{ cat }}' !== 'Sem categoria' }" class="bg-gray-900 rounded-lg border border-gray-800">
-        <button @click="open=!open"
-                class="w-full flex items-center justify-between px-3 py-2.5 text-sm font-medium text-gray-300 hover:text-white">
-          <span class="flex items-center gap-2">
-            <span>{{ cat_icons.get(cat, '📁') }}</span>
-            <span>{{ cat }}</span>
-          </span>
-          <span class="flex items-center gap-2">
-            <span class="text-xs text-gray-500">{{ docs|length }}</span>
-            <svg class="w-3 h-3 transition-transform" :class="open ? 'rotate-180' : ''"
-                 fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
-            </svg>
-          </span>
-        </button>
-        <div x-show="open" x-cloak class="border-t border-gray-800">
-          {% for doc in docs %}
-          <button @click="preview='{{ doc.id }}'; previewName='{{ doc.filename|replace("'","\\'")|truncate(35) }}'"
-                  class="w-full text-left px-3 py-2 text-xs text-gray-400 hover:bg-gray-800 hover:text-gray-200
-                         transition-colors flex items-center gap-2 group"
-                  :class="preview=='{{ doc.id }}' ? 'bg-gray-800 text-gray-200' : ''">
-            <svg class="w-3 h-3 flex-shrink-0 text-gray-600 group-hover:text-indigo-400" fill="currentColor" viewBox="0 0 20 20">
-              <path d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z"/>
-            </svg>
-            <span class="truncate">{{ doc.filename }}</span>
+
+      {% for sc, cats in subclients.items() %}
+
+        {% if has_subclients %}
+          <!-- Sub-client header -->
+          <div class="flex items-center gap-2 px-2 pt-3 pb-1">
+            {% if sc %}
+              <span class="text-xs font-semibold uppercase tracking-wider text-indigo-400">{{ sc }}</span>
+              {% if sc_missing.get(sc) %}
+                {% for m in sc_missing[sc] %}
+                <span class="text-xs px-1.5 py-0.5 rounded bg-red-900/40 text-red-400 border border-red-800">
+                  {{ m }}
+                </span>
+                {% endfor %}
+              {% endif %}
+            {% else %}
+              <span class="text-xs font-semibold uppercase tracking-wider text-gray-500">Partilhado</span>
+            {% endif %}
+          </div>
+        {% endif %}
+
+        <!-- Category groups for this sub-client -->
+        {% for cat, docs in cats.items() %}
+        <div x-data="{ open: '{{ cat }}' !== 'Sem categoria' }"
+             class="bg-gray-900 rounded-lg border border-gray-800 {% if has_subclients %}ml-2{% endif %}">
+          <button @click="open=!open"
+                  class="w-full flex items-center justify-between px-3 py-2.5 text-sm font-medium text-gray-300 hover:text-white">
+            <span class="flex items-center gap-2">
+              <span>{{ cat_icons.get(cat, '📁') }}</span>
+              <span>{{ cat }}</span>
+            </span>
+            <span class="flex items-center gap-2">
+              <span class="text-xs text-gray-500">{{ docs|length }}</span>
+              <svg class="w-3 h-3 transition-transform" :class="open ? 'rotate-180' : ''"
+                   fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+              </svg>
+            </span>
           </button>
-          {% endfor %}
+          <div x-show="open" x-cloak class="border-t border-gray-800">
+            {% for doc in docs %}
+            <button @click="preview='{{ doc.id }}'; previewName='{{ doc.filename|replace("'","\\'")|truncate(35) }}'"
+                    class="w-full text-left px-3 py-2 text-xs text-gray-400 hover:bg-gray-800 hover:text-gray-200
+                           transition-colors flex items-center gap-2 group"
+                    :class="preview=='{{ doc.id }}' ? 'bg-gray-800 text-gray-200' : ''">
+              <svg class="w-3 h-3 flex-shrink-0 text-gray-600 group-hover:text-indigo-400" fill="currentColor" viewBox="0 0 20 20">
+                <path d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z"/>
+              </svg>
+              <span class="truncate">{{ doc.filename }}</span>
+            </button>
+            {% endfor %}
+          </div>
         </div>
-      </div>
+        {% endfor %}
+
       {% endfor %}
     </div>
 

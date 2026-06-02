@@ -46,26 +46,29 @@ def _sync_documents(db, client_folder: Path, client_id: int):
             continue
         if path.suffix.lower() not in DOC_EXTS:
             continue
-        # Determine category from parent folder name
-        category = None
-        rel = path.relative_to(client_folder)
+        # Determine category and subclient from path depth
+        category  = None
+        subclient = None
+        rel   = path.relative_to(client_folder)
         parts = rel.parts
         if len(parts) >= 2 and parts[0] in STANDARD_FOLDERS:
-            category = parts[0]
+            category  = parts[0]          # root-level: Rendimentos/file.pdf
         elif len(parts) >= 3 and parts[1] in STANDARD_FOLDERS:
-            category = parts[1]  # e.g. fiador/Rendimentos/file.pdf
+            subclient = parts[0]          # e.g. Ipshita, Ribal, fiador
+            category  = parts[1]
 
         rel_path = str(path.relative_to(BASE_DIR))
         stat = path.stat()
         db.execute(
-            """INSERT INTO documents(client_id,category,filename,rel_path,abs_path,
+            """INSERT INTO documents(client_id,category,subclient,filename,rel_path,abs_path,
                                      file_size,file_mtime,mime_type)
-               VALUES(?,?,?,?,?,?,?,?)
+               VALUES(?,?,?,?,?,?,?,?,?)
                ON CONFLICT(rel_path) DO UPDATE SET
                  category=excluded.category,
+                 subclient=excluded.subclient,
                  file_size=excluded.file_size,
                  file_mtime=excluded.file_mtime""",
-            (client_id, category, path.name, rel_path, str(path),
+            (client_id, category, subclient, path.name, rel_path, str(path),
              stat.st_size, str(stat.st_mtime),
              MIME.get(path.suffix.lower(), "application/octet-stream"))
         )
