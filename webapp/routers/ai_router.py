@@ -14,7 +14,7 @@ tmpl   = Jinja2Templates(directory=str(TEMPLATE_DIR))
 def assistant_page(request: Request, client_id: int = None):
     user = current_user(request)
     with get_db() as db:
-        clients = db.execute("SELECT id, folder_name FROM clients ORDER BY folder_name").fetchall()
+        clients = db.execute("SELECT id, folder_name FROM clients WHERE is_standby=0 ORDER BY folder_name").fetchall()
         history = []
         if client_id:
             history = db.execute(

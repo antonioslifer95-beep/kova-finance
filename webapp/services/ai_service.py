@@ -1,5 +1,5 @@
 """AI Q&A — uses Claude API when key available, FTS excerpts as fallback."""
-import json
+import json, re
 from database import setting
 from services.indexer import search
 
@@ -10,8 +10,39 @@ If you cannot find the answer in the context, say so clearly.
 Always cite which document the information comes from.
 Respond in the same language the user writes in (Portuguese or English)."""
 
+# Common stop words to strip before FTS query
+_STOP = {
+    "what","is","the","of","a","an","in","for","to","and","or","can","you",
+    "give","me","tell","show","find","who","how","when","where","do","does",
+    "qual","o","a","de","da","do","em","para","com","que","um","uma","me",
+    "diz","qual","quais","foi","tem","seu","sua","seus","suas",
+}
+
+def _to_fts_query(text: str) -> str:
+    """
+    Convert a natural-language question to an FTS5-safe keyword query.
+    Strips stop words, quotes each remaining token, joins with OR so partial
+    matches still surface relevant results.
+    """
+    tokens = re.findall(r'\w+', text.lower())
+    keywords = [t for t in tokens if t not in _STOP and len(t) > 2]
+    if not keywords:
+        keywords = [t for t in tokens if len(t) > 2]  # fallback: skip only very short words
+    # Quote tokens so special FTS chars are safe; OR so any hit surfaces
+    return " OR ".join(f'"{k}"' for k in keywords[:10])
+
 def _build_context(query: str, client_id: int = None) -> tuple[list, list]:
-    results = search(query, client_id=client_id, limit=6)
+    fts_q = _to_fts_query(query)
+    try:
+        results = search(fts_q, client_id=client_id, limit=8)
+    except Exception:
+        results = []
+    # If keyword search missed, fall back to raw query as a phrase
+    if not results:
+        try:
+            results = search(f'"{query}"', client_id=client_id, limit=8)
+        except Exception:
+            results = []
     if not results:
         return [], []
     context_parts = []
