@@ -38,7 +38,11 @@ def _upsert_client(db, folder: Path, standby: bool):
         "SELECT id FROM clients WHERE folder_name=?", (folder.name,)
     ).fetchone()["id"]
 
-    _sync_documents(db, folder, client_id)
+    if standby:
+        # Standby clients are inactive — purge any previously indexed documents
+        db.execute("DELETE FROM documents WHERE client_id=?", (client_id,))
+    else:
+        _sync_documents(db, folder, client_id)
 
 def _sync_documents(db, client_folder: Path, client_id: int):
     seen: set = set()
@@ -99,9 +103,9 @@ def unorganized_docs(db, client_id: int = None):
     if client_id:
         return db.execute(
             "SELECT d.*, c.folder_name FROM documents d JOIN clients c ON c.id=d.client_id "
-            "WHERE d.category IS NULL AND d.client_id=?", (client_id,)
+            "WHERE d.category IS NULL AND c.is_standby=0 AND d.client_id=?", (client_id,)
         ).fetchall()
     return db.execute(
         "SELECT d.*, c.folder_name FROM documents d JOIN clients c ON c.id=d.client_id "
-        "WHERE d.category IS NULL ORDER BY c.folder_name"
+        "WHERE d.category IS NULL AND c.is_standby=0 ORDER BY c.folder_name"
     ).fetchall()
