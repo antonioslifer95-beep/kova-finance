@@ -107,6 +107,35 @@ def _subclient_has_content(folder: Path) -> bool:
     return False
 
 
+def _parse_person_names(folder_name: str) -> List[str]:
+    """
+    Extract individual person names from a two-person client folder name.
+    'Angel e Ana Isabel' -> ['Angel', 'Ana Isabel']
+    'Ipshita and Ribal'  -> ['Ipshita', 'Ribal']
+    Returns [] for single-person clients.
+    """
+    for sep in [" e ", " and ", " & "]:
+        lower = folder_name.lower()
+        idx = lower.find(sep.lower())
+        if idx != -1:
+            a = folder_name[:idx].strip()
+            b = folder_name[idx + len(sep):].strip()
+            return [n for n in [a, b] if n]
+    return []
+
+
+def _name_patterns(sc_name: str) -> List:
+    """
+    Return regex patterns for matching a person name in a normalised filename stem.
+    Handles both spaced ('ana isabel') and compact ('anaisabel') forms.
+    """
+    patterns = [re.compile(r'\b' + re.escape(sc_name) + r'\b', re.IGNORECASE)]
+    if ' ' in sc_name:
+        compact = sc_name.replace(' ', '')
+        patterns.append(re.compile(r'\b' + re.escape(compact) + r'\b', re.IGNORECASE))
+    return patterns
+
+
 def _get_subclient_folders(client_folder: Path) -> List[Path]:
     """Non-standard, non-dissolve subfolders that represent co-applicants or guarantors."""
     standard_lower = {s.lower() for s in STANDARD_FOLDERS}
@@ -462,13 +491,13 @@ def find_image_merge_groups(
     return {k: sorted(v, key=lambda p: p.stem) for k, v in groups.items() if len(v) >= 2}
 
 
-def find_inplace_image_merges(client_folder: Path) -> List[Dict]:
+def find_inplace_image_merges(client_folder: Path, subclients: List[Path] = None) -> List[Dict]:
     """
     Find multi-page image groups already inside standard subfolders.
     These are merged in-place (no move needed, just combine to PDF).
     """
     merges = []
-    scopes: List[Path] = [client_folder] + _get_subclient_folders(client_folder)
+    scopes: List[Path] = [client_folder] + (subclients if subclients is not None else _get_subclient_folders(client_folder))
 
     for base in scopes:
         for std in STANDARD_FOLDERS:
@@ -513,7 +542,7 @@ def find_misrouted_files(client_folder: Path, subclients: List[Path]) -> List[Di
             stem_norm = normalize_stem(f.stem)
             for subclient in subclients:
                 sc_name = normalize_stem(subclient.name)
-                if re.search(r'\b' + re.escape(sc_name) + r'\b', stem_norm):
+                if any(pat.search(stem_norm) for pat in _name_patterns(sc_name)):
                     target = subclient / std / f.name
                     if target.resolve() != f.resolve():
                         moves.append({"from": str(f), "to": str(target)})
@@ -564,13 +593,24 @@ def scan_client(
         "uncategorized": [],
     }
 
-    # Collect standard folders to create — root and all sub-client folders
+    # Collect standard folders to create — root level
     for std in STANDARD_FOLDERS:
         target = client_folder / std
         if not target.exists():
             plan["new_folders"].append(str(target))
 
-    for subclient in _get_subclient_folders(client_folder):
+    # Build full sub-client list: existing folders + auto-detected person names
+    existing_subclients = _get_subclient_folders(client_folder)
+    existing_lower = {sc.name.lower() for sc in existing_subclients}
+    parsed_names = _parse_person_names(client_folder.name)
+    extra_subclients = [
+        client_folder / name
+        for name in parsed_names
+        if name.lower() not in existing_lower
+    ]
+    all_subclients = existing_subclients + extra_subclients
+
+    for subclient in all_subclients:
         for std in STANDARD_FOLDERS:
             target = subclient / std
             if not target.exists():
@@ -626,12 +666,11 @@ def scan_client(
             })
 
     # Migrate files from root standard folders to per-sub-client folders
-    subclients = _get_subclient_folders(client_folder)
-    for m in find_misrouted_files(client_folder, subclients):
+    for m in find_misrouted_files(client_folder, all_subclients):
         plan["moves"].append(m)
 
     # Also merge image groups that are already inside standard subfolders
-    for mg in find_inplace_image_merges(client_folder):
+    for mg in find_inplace_image_merges(client_folder, all_subclients):
         plan["merges"].append(mg)
 
     # Find exact duplicates
