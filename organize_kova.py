@@ -70,14 +70,60 @@ STANDARD_FOLDERS = [
     "Proposta Crédito",
 ]
 
-# These subfolders act as sub-clients and get their own STANDARD_FOLDERS inside
-SUBCLIENT_FOLDERS = {"fiador"}
-
 # These subfolders are dissolved: their files are redistributed into standard folders
 DISSOLVE_FOLDERS = {"documentos processados", "hpp"}
 
+# Words that mark a subfolder as temporary/working (to be dissolved)
+_DISSOLVE_WORDS = {"processados", "processadas", "verificar", "hpp"}
+
+
+def _is_dissolve_folder(name: str) -> bool:
+    """True for temp/working folders whose contents should be redistributed."""
+    n = name.lower()
+    if n in DISSOLVE_FOLDERS:
+        return True
+    if n.startswith("_"):
+        return True
+    return any(w in n for w in _DISSOLVE_WORDS)
+
+
+def _subclient_has_content(folder: Path) -> bool:
+    """
+    True when a subfolder is worth treating as a sub-client:
+    - has loose files at its root, OR
+    - has files inside non-standard sub-subfolders (dissolve fodder), OR
+    - already has at least one standard subfolder that itself contains files
+      (i.e. was previously organised as a sub-client and still has docs).
+    """
+    standard_lower = {s.lower() for s in STANDARD_FOLDERS}
+    for item in folder.iterdir():
+        if item.is_file() and item.suffix.lower() not in SKIP_EXTENSIONS:
+            return True  # loose file
+        if item.is_dir():
+            if item.name.lower() in standard_lower:
+                # Standard subfolder — only counts if it has files
+                if any(f.is_file() for f in item.rglob("*") if f.suffix.lower() not in SKIP_EXTENSIONS):
+                    return True
+            else:
+                # Non-standard sub-subfolder (dissolve fodder)
+                if any(f.is_file() for f in item.rglob("*") if f.suffix.lower() not in SKIP_EXTENSIONS):
+                    return True
+    return False
+
+
+def _get_subclient_folders(client_folder: Path) -> List[Path]:
+    """Non-standard, non-dissolve subfolders that represent co-applicants or guarantors."""
+    standard_lower = {s.lower() for s in STANDARD_FOLDERS}
+    return [
+        item for item in client_folder.iterdir()
+        if item.is_dir()
+        and item.name.lower() not in standard_lower
+        and not _is_dissolve_folder(item.name)
+        and _subclient_has_content(item)
+    ]
+
 # Top-level names to skip
-SKIP_NAMES = {".claude", "standby", "despesas valencia", "nova pasta"}
+SKIP_NAMES = {".claude", ".git", "standby", "despesas valencia", "nova pasta", "webapp"}
 
 # File extensions to skip entirely
 SKIP_EXTENSIONS = {".action", ".json", ".xlsx", ".xls", ".docx", ".doc"}
@@ -148,7 +194,7 @@ NORMALIZED_RULES: Dict[str, List[str]] = {
     "Rendimentos": [
         r"^recibo[s]?(\s|$)", r"^recibo de vencimento", r"^recibos de vencimento",
         r"declaracao patronal", r"decl patronal", r"^geprecib",
-        r"^contrato de trabalho", r"^contract( |$)", r"certificat de salaire", r"salary (certificate|slip|cert)",
+        r"^contrato de trabalho", r"\bcontract( addendum)?\b", r"certificat de salaire", r"salary (certificate|slip|cert)",
         r"^fatura al ", r"informe.*rendimento", r"informederendimento",
         # Payslips named as "87913RecJaneiro", "87913RecDezembro" etc.
         r"rec(janeiro|fevereiro|marco|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro)",
@@ -357,44 +403,48 @@ def get_loose_files(folder: Path) -> List[Path]:
 
 def get_files_to_organize(client_folder: Path) -> List[Tuple[Path, Path]]:
     """
-    Returns (file_path, target_base_folder) for all files that need categorizing:
-    - Files at root of client_folder
-    - Files inside DISSOLVE_FOLDERS (documentos processados, HPP)
-    - Files at root of SUBCLIENT_FOLDERS (fiador)
-    - Files inside DISSOLVE_FOLDERS nested within SUBCLIENT_FOLDERS
-    - Files inside ANY other non-standard subfolder (dissolved into client root)
+    Returns (file_path, target_base_folder) for all files that need categorizing.
+
+    Target base folder determines where standard subfolders are created:
+    - client root  → for loose files, dissolve-folder contents, and shared docs
+    - sub-client/  → for files belonging to a specific co-applicant or guarantor
+
+    Sub-client folders (e.g. Ipshita/, Ribal/, fiador/) get their own standard
+    subfolders.  Dissolve folders (processados, _Para_Verificar, HPP, etc.) have
+    their contents redistributed into the nearest base folder.
     """
     results: List[Tuple[Path, Path]] = []
     standard_lower = {s.lower() for s in STANDARD_FOLDERS}
 
+    # Loose files at root
     for f in get_loose_files(client_folder):
         results.append((f, client_folder))
 
     for item in client_folder.iterdir():
         if not item.is_dir():
             continue
-        name_lower = item.name.lower()
+        if item.name.lower() in standard_lower:
+            continue  # already organised
 
-        if name_lower in DISSOLVE_FOLDERS:
+        if _is_dissolve_folder(item.name):
+            # Redistribute into client root
             for f in item.rglob("*"):
                 if f.is_file() and f.suffix.lower() not in SKIP_EXTENSIONS:
                     results.append((f, client_folder))
-
-        elif name_lower in SUBCLIENT_FOLDERS:
+        else:
+            # Sub-client folder (Ipshita, Ribal, fiador, …)
+            # Loose files → this sub-client's standard subfolders
             for f in get_loose_files(item):
                 results.append((f, item))
             for sub in item.iterdir():
-                if sub.is_dir() and sub.name.lower() in DISSOLVE_FOLDERS:
-                    for f in sub.rglob("*"):
-                        if f.is_file() and f.suffix.lower() not in SKIP_EXTENSIONS:
-                            results.append((f, item))
-
-        elif name_lower not in standard_lower:
-            # Any other non-standard subfolder (e.g. Ipshita/, Ribal/, _Para_Verificar/)
-            # — dissolve all contents into the client root standard folders
-            for f in item.rglob("*"):
-                if f.is_file() and f.suffix.lower() not in SKIP_EXTENSIONS:
-                    results.append((f, client_folder))
+                if not sub.is_dir():
+                    continue
+                if sub.name.lower() in standard_lower:
+                    continue  # already organised inside sub-client
+                # Any nested subfolder inside sub-client → dissolve into sub-client
+                for f in sub.rglob("*"):
+                    if f.is_file() and f.suffix.lower() not in SKIP_EXTENSIONS:
+                        results.append((f, item))
 
     return results
 
@@ -422,12 +472,7 @@ def find_inplace_image_merges(client_folder: Path) -> List[Dict]:
     These are merged in-place (no move needed, just combine to PDF).
     """
     merges = []
-    scopes: List[Path] = [client_folder]
-
-    # Also check fiador subfolders
-    for item in client_folder.iterdir():
-        if item.is_dir() and item.name.lower() in SUBCLIENT_FOLDERS:
-            scopes.append(item)
+    scopes: List[Path] = [client_folder] + _get_subclient_folders(client_folder)
 
     for base in scopes:
         for std in STANDARD_FOLDERS:
@@ -497,18 +542,17 @@ def scan_client(
         "uncategorized": [],
     }
 
-    # Collect standard folders to create
+    # Collect standard folders to create — root and all sub-client folders
     for std in STANDARD_FOLDERS:
         target = client_folder / std
         if not target.exists():
             plan["new_folders"].append(str(target))
 
-    for item in client_folder.iterdir():
-        if item.is_dir() and item.name.lower() in SUBCLIENT_FOLDERS:
-            for std in STANDARD_FOLDERS:
-                target = item / std
-                if not target.exists():
-                    plan["new_folders"].append(str(target))
+    for subclient in _get_subclient_folders(client_folder):
+        for std in STANDARD_FOLDERS:
+            target = subclient / std
+            if not target.exists():
+                plan["new_folders"].append(str(target))
 
     # Get all files that need organizing
     to_organize = get_files_to_organize(client_folder)
