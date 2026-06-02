@@ -554,13 +554,90 @@ def find_inplace_image_merges(client_folder: Path, subclients: List[Path] = None
     return merges
 
 
-def find_misrouted_files(client_folder: Path, subclients: List[Path]) -> List[Dict]:
+# Categories that belong to one person — AI can decide which.
+# Imóvel and Proposta Crédito are typically shared, so left at root.
+_PERSONAL_CATEGORIES = {
+    "Documentos Pessoais", "Rendimentos", "Extratos Bancários",
+    "IRS", "Mapa CRC", "RGPD",
+}
+
+
+def identify_person_by_vision(
+    path: Path, person_names: List[str], ai_client
+) -> Optional[str]:
     """
-    Find files sitting in root standard folders that belong to a specific sub-client
-    (identified by the sub-client folder name appearing as a word in the filename).
-    Returns move-plan dicts to route them into the correct sub-client standard folder.
+    Ask Claude which person a document belongs to when the filename gives no clue.
+    Returns one of the person_names, or None if shared / uncertain.
+    """
+    ext = path.suffix.lower()
+    b64 = media_type = None
+
+    if ext == ".pdf":
+        try:
+            import fitz
+            doc = fitz.open(str(path))
+            pix = doc[0].get_pixmap(dpi=120)
+            b64 = base64.standard_b64encode(pix.tobytes("jpeg")).decode()
+            media_type = "image/jpeg"
+            doc.close()
+        except Exception as e:
+            print(f"    PDF render error ({path.name}): {e}")
+            return None
+    elif ext in IMAGE_EXTS:
+        media_type = "image/png" if ext == ".png" else "image/jpeg"
+        try:
+            with open(path, "rb") as f:
+                b64 = base64.standard_b64encode(f.read()).decode()
+        except Exception:
+            return None
+    else:
+        return None
+
+    names_str = " / ".join(person_names)
+    prompt = (
+        f"This document is from a joint mortgage dossier for: {names_str}.\n"
+        f"Which SINGLE person does this document belong to?\n"
+        f"Reply with ONLY one of these exact names: {names_str}\n"
+        f"If it clearly belongs to both or neither, reply: shared"
+    )
+    try:
+        resp = ai_client.messages.create(
+            model=VISION_MODEL,
+            max_tokens=20,
+            messages=[{
+                "role": "user",
+                "content": [
+                    {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": b64}},
+                    {"type": "text", "text": prompt},
+                ],
+            }],
+        )
+        result = resp.content[0].text.strip()
+        if "shared" in result.lower():
+            return None
+        for name in person_names:
+            if name.lower() in result.lower() or result.lower() in name.lower():
+                return name
+    except Exception as e:
+        print(f"    Person-vision error ({path.name}): {e}")
+    return None
+
+
+def find_misrouted_files(
+    client_folder: Path,
+    subclients: List[Path],
+    use_vision: bool = False,
+    ai_client=None,
+) -> List[Dict]:
+    """
+    Find files sitting in root standard folders that belong to a specific sub-client.
+    1. Try filename pattern matching (fast, free).
+    2. If no match and vision is enabled, ask Claude which person it belongs to.
+    Files in shared categories (Imóvel, Proposta Crédito) are never reassigned.
     """
     moves = []
+    person_names = [sc.name for sc in subclients]
+
     for std in STANDARD_FOLDERS:
         std_folder = client_folder / std
         if not std_folder.exists():
@@ -569,13 +646,27 @@ def find_misrouted_files(client_folder: Path, subclients: List[Path]) -> List[Di
             if not f.is_file() or f.suffix.lower() in SKIP_EXTENSIONS:
                 continue
             stem_norm = normalize_stem(f.stem)
+
+            # 1. Filename match
+            matched = None
             for subclient in subclients:
                 sc_name = normalize_stem(subclient.name)
                 if any(pat.search(stem_norm) for pat in _name_patterns(sc_name)):
-                    target = subclient / std / f.name
-                    if target.resolve() != f.resolve():
-                        moves.append({"from": str(f), "to": str(target)})
+                    matched = subclient
                     break
+
+            # 2. AI vision fallback — only for personal categories
+            if matched is None and use_vision and ai_client and len(subclients) >= 2:
+                if std in _PERSONAL_CATEGORIES and f.suffix.lower() in IMAGE_EXTS | {".pdf"}:
+                    print(f"    [vision-person] {f.name}")
+                    person_name = identify_person_by_vision(f, person_names, ai_client)
+                    if person_name:
+                        matched = next((sc for sc in subclients if sc.name == person_name), None)
+
+            if matched is not None:
+                target = matched / std / f.name
+                if target.resolve() != f.resolve():
+                    moves.append({"from": str(f), "to": str(target)})
     return moves
 
 
@@ -695,7 +786,8 @@ def scan_client(
             })
 
     # Migrate files from root standard folders to per-sub-client folders
-    for m in find_misrouted_files(client_folder, all_subclients):
+    for m in find_misrouted_files(client_folder, all_subclients,
+                                   use_vision=use_vision, ai_client=ai_client):
         plan["moves"].append(m)
 
     # Also merge image groups that are already inside standard subfolders
