@@ -127,12 +127,19 @@ def _parse_person_names(folder_name: str) -> List[str]:
 def _name_patterns(sc_name: str) -> List:
     """
     Return regex patterns for matching a person name in a normalised filename stem.
-    Handles both spaced ('ana isabel') and compact ('anaisabel') forms.
+    Handles:
+    - Full name match:    'paulo macario'  -> \bpaulo macario\b
+    - Compact match:      'paulo macario'  -> \bpaulomacario\b  (e.g. PauloMacario)
+    - First-name match:   'paulo macario'  -> \bpaulo\b  (e.g. CC_Paulo.pdf)
+    First-name-only match requires >=4 chars to avoid false positives on short names.
     """
     patterns = [re.compile(r'\b' + re.escape(sc_name) + r'\b', re.IGNORECASE)]
     if ' ' in sc_name:
         compact = sc_name.replace(' ', '')
         patterns.append(re.compile(r'\b' + re.escape(compact) + r'\b', re.IGNORECASE))
+        first = sc_name.split()[0]
+        if len(first) >= 4:
+            patterns.append(re.compile(r'\b' + re.escape(first) + r'\b', re.IGNORECASE))
     return patterns
 
 
