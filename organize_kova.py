@@ -128,18 +128,40 @@ def _name_patterns(sc_name: str) -> List:
     """
     Return regex patterns for matching a person name in a normalised filename stem.
     Handles:
-    - Full name match:    'paulo macario'  -> \bpaulo macario\b
-    - Compact match:      'paulo macario'  -> \bpaulomacario\b  (e.g. PauloMacario)
-    - First-name match:   'paulo macario'  -> \bpaulo\b  (e.g. CC_Paulo.pdf)
-    First-name-only match requires >=4 chars to avoid false positives on short names.
+    - Full name:      'paulo macario'  -> \bpaulo macario\b
+    - Compact:        'paulo macario'  -> \bpaulomacario\b  (PauloMacario)
+    - First name:     'paulo macario'  -> \bpaulo\b  (CC_Paulo.pdf)
+    - Fuzzy vowel:    'elizbieta'      -> \belzbieta\b  (single missing vowel)
     """
-    patterns = [re.compile(r'\b' + re.escape(sc_name) + r'\b', re.IGNORECASE)]
+    seen: set = set()
+
+    def _add(word: str):
+        w = word.strip()
+        if w and w.lower() not in seen:
+            seen.add(w.lower())
+            patterns.append(re.compile(r'\b' + re.escape(w) + r'\b', re.IGNORECASE))
+
+    patterns: List = []
+    _add(sc_name)
+
     if ' ' in sc_name:
         compact = sc_name.replace(' ', '')
-        patterns.append(re.compile(r'\b' + re.escape(compact) + r'\b', re.IGNORECASE))
+        _add(compact)
         first = sc_name.split()[0]
         if len(first) >= 4:
-            patterns.append(re.compile(r'\b' + re.escape(first) + r'\b', re.IGNORECASE))
+            _add(first)
+
+    # Fuzzy: for single-word names >=7 chars, try each vowel removed.
+    # Catches e.g. "Elizbieta" -> "Elzbieta" (folder typo vs filenames).
+    base = sc_name if ' ' not in sc_name else sc_name.split()[0]
+    if len(base) >= 7:
+        _VOWELS = set('aeiouáéíóúàèìòùãõâêîôûäëïöü')
+        for i, ch in enumerate(base.lower()):
+            if ch in _VOWELS:
+                variant = base[:i] + base[i + 1:]
+                if len(variant) >= 4:
+                    _add(variant)
+
     return patterns
 
 
