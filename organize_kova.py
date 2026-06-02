@@ -148,7 +148,7 @@ NORMALIZED_RULES: Dict[str, List[str]] = {
     "Rendimentos": [
         r"^recibo[s]?(\s|$)", r"^recibo de vencimento", r"^recibos de vencimento",
         r"declaracao patronal", r"decl patronal", r"^geprecib",
-        r"^contrato de trabalho", r"certificat de salaire", r"salary (certificate|slip|cert)",
+        r"^contrato de trabalho", r"^contract( |$)", r"certificat de salaire", r"salary (certificate|slip|cert)",
         r"^fatura al ", r"informe.*rendimento", r"informederendimento",
         # Payslips named as "87913RecJaneiro", "87913RecDezembro" etc.
         r"rec(janeiro|fevereiro|marco|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro)",
@@ -295,12 +295,31 @@ def images_to_pdf(image_paths: List[Path], output_path: Path) -> bool:
 
 
 def categorize_by_vision(path: Path, client) -> Optional[str]:
-    """Ask Claude Haiku to classify a document image."""
+    """Ask Claude Haiku to classify a document by its first page (image or PDF)."""
     ext = path.suffix.lower()
-    media_type = "image/png" if ext == ".png" else "image/jpeg"
+
+    if ext == ".pdf":
+        try:
+            import fitz
+            doc = fitz.open(str(path))
+            pix = doc[0].get_pixmap(dpi=120)
+            img_bytes = pix.tobytes("jpeg")
+            doc.close()
+            b64 = base64.standard_b64encode(img_bytes).decode()
+            media_type = "image/jpeg"
+        except Exception as e:
+            print(f"    PDF render error for {path.name}: {e}")
+            return None
+    else:
+        media_type = "image/png" if ext == ".png" else "image/jpeg"
+        try:
+            with open(path, "rb") as f:
+                b64 = base64.standard_b64encode(f.read()).decode()
+        except Exception as e:
+            print(f"    Read error for {path.name}: {e}")
+            return None
+
     try:
-        with open(path, "rb") as f:
-            b64 = base64.standard_b64encode(f.read()).decode()
         resp = client.messages.create(
             model=VISION_MODEL,
             max_tokens=30,
@@ -343,8 +362,10 @@ def get_files_to_organize(client_folder: Path) -> List[Tuple[Path, Path]]:
     - Files inside DISSOLVE_FOLDERS (documentos processados, HPP)
     - Files at root of SUBCLIENT_FOLDERS (fiador)
     - Files inside DISSOLVE_FOLDERS nested within SUBCLIENT_FOLDERS
+    - Files inside ANY other non-standard subfolder (dissolved into client root)
     """
     results: List[Tuple[Path, Path]] = []
+    standard_lower = {s.lower() for s in STANDARD_FOLDERS}
 
     for f in get_loose_files(client_folder):
         results.append((f, client_folder))
@@ -367,6 +388,13 @@ def get_files_to_organize(client_folder: Path) -> List[Tuple[Path, Path]]:
                     for f in sub.rglob("*"):
                         if f.is_file() and f.suffix.lower() not in SKIP_EXTENSIONS:
                             results.append((f, item))
+
+        elif name_lower not in standard_lower:
+            # Any other non-standard subfolder (e.g. Ipshita/, Ribal/, _Para_Verificar/)
+            # — dissolve all contents into the client root standard folders
+            for f in item.rglob("*"):
+                if f.is_file() and f.suffix.lower() not in SKIP_EXTENSIONS:
+                    results.append((f, client_folder))
 
     return results
 
@@ -512,8 +540,8 @@ def scan_client(
 
         category = categorize_by_name(file_path.stem)
 
-        if category is None and file_path.suffix.lower() in IMAGE_EXTS:
-            if use_vision and ai_client:
+        if category is None and use_vision and ai_client:
+            if file_path.suffix.lower() in IMAGE_EXTS | {".pdf"}:
                 print(f"    [vision] {file_path.name}")
                 category = categorize_by_vision(file_path, ai_client)
 
