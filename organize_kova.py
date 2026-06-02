@@ -556,6 +556,7 @@ def scan_client(
 ) -> Dict:
     plan: Dict = {
         "client": client_folder.name,
+        "client_folder": str(client_folder),
         "new_folders": [],
         "moves": [],
         "merges": [],
@@ -721,6 +722,35 @@ def print_plan(plans: List[Dict]) -> None:
     print(f"{sep}\n")
 
 
+# ─── Cleanup ───────────────────────────────────────────────────────────────
+
+def cleanup_empty_folders(client_folder: Path) -> List[str]:
+    """
+    Remove empty directories left over after organising (dissolved folders,
+    old processados dirs, etc.).  Standard folders and sub-client folders that
+    still have files are preserved.  Walks bottom-up so nested empties are
+    caught in one pass.
+    """
+    standard_lower = {s.lower() for s in STANDARD_FOLDERS}
+    removed = []
+
+    dirs_deepest_first = sorted(
+        (d for d in client_folder.rglob("*") if d.is_dir() and d != client_folder),
+        key=lambda p: len(p.parts),
+        reverse=True,
+    )
+    for d in dirs_deepest_first:
+        if d.name.lower() in standard_lower:
+            continue  # never remove standard folders
+        if not any(d.rglob("*")):  # truly empty (no files, no subdirs)
+            try:
+                d.rmdir()
+                removed.append(str(d))
+            except OSError:
+                pass
+    return removed
+
+
 # ─── Apply ─────────────────────────────────────────────────────────────────
 
 def apply_plan(plans: List[Dict]) -> None:
@@ -790,6 +820,16 @@ def apply_plan(plans: List[Dict]) -> None:
                 delete_path.unlink()
                 print(f"  del dupe  {delete_path.name}")
                 actions += 1
+
+        # Remove empty leftover folders (dissolved dirs, old processados, etc.)
+        removed = cleanup_empty_folders(Path(p["client_folder"]))
+        for r in removed:
+            try:
+                rel = Path(r).relative_to(BASE_DIR)
+            except ValueError:
+                rel = Path(r)
+            print(f"  rmdir  {rel}")
+            actions += 1
 
         if actions == 0:
             print("  (nothing to do)")
