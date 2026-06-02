@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — Kova Finance{% endblock %}
+{% block nav_dashboard %}active{% endblock %}
+
+{% block content %}
+<div class="flex items-center justify-between mb-8">
+  <div>
+    <h1 class="text-2xl font-semibold text-gray-100">Clients</h1>
+    <p class="text-gray-500 text-sm mt-0.5">{{ cards|length }} active clients</p>
+  </div>
+  <a href="/organizer"
+     class="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm
+            font-medium px-4 py-2 rounded-lg transition-colors">
+    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+    </svg>
+    Organizer
+  </a>
+</div>
+
+<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+  {% for card in cards %}
+  <a href="/clients/{{ card.id }}"
+     class="bg-gray-900 border border-gray-800 hover:border-indigo-600/60 rounded-xl p-5
+            transition-all hover:shadow-lg hover:shadow-indigo-900/20 block group">
+    <div class="flex items-start justify-between mb-3">
+      <h2 class="text-sm font-medium text-gray-200 group-hover:text-white leading-snug pr-2">
+        {{ card.name }}
+      </h2>
+      {% if card.missing %}
+      <span class="flex-shrink-0 inline-flex items-center px-1.5 py-0.5 rounded text-xs
+                   bg-red-900/50 text-red-400 border border-red-800">
+        {{ card.missing|length }} missing
+      </span>
+      {% endif %}
+    </div>
+    <div class="text-2xl font-bold text-gray-100 mb-3">{{ card.total }}</div>
+    <div class="flex flex-wrap gap-1">
+      {% set cat_colors = {
+        'Documentos Pessoais': 'bg-blue-900/40 text-blue-300',
+        'Rendimentos': 'bg-green-900/40 text-green-300',
+        'Extratos Bancários': 'bg-cyan-900/40 text-cyan-300',
+        'IRS': 'bg-yellow-900/40 text-yellow-300',
+        'Imóvel': 'bg-orange-900/40 text-orange-300',
+        'Mapa CRC': 'bg-purple-900/40 text-purple-300',
+        'RGPD': 'bg-pink-900/40 text-pink-300',
+        'Proposta Crédito': 'bg-indigo-900/40 text-indigo-300',
+      } %}
+      {% for cat in std_folders %}
+      {% set cnt = card.by_cat.get(cat, 0) %}
+      {% if cnt > 0 %}
+      <span class="text-xs px-1.5 py-0.5 rounded {{ cat_colors.get(cat, 'bg-gray-800 text-gray-400') }}">
+        {{ cnt }}
+      </span>
+      {% endif %}
+      {% endfor %}
+      {% if card.unorganized > 0 %}
+      <span class="text-xs px-1.5 py-0.5 rounded bg-red-900/40 text-red-400">
+        {{ card.unorganized }} unsorted
+      </span>
+      {% endif %}
+    </div>
+  </a>
+  {% endfor %}
+</div>
+
+{% if not cards %}
+<div class="text-center py-20 text-gray-500">
+  <p>No clients found. Check that the Kova Finance folder is accessible.</p>
+</div>
+{% endif %}
+{% endblock %}

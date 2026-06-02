@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}Search — Kova Finance{% endblock %}
+{% block nav_search %}active{% endblock %}
+
+{% block content %}
+<h1 class="text-xl font-semibold mb-6">Search Documents</h1>
+
+<form method="get" action="/search" class="flex gap-2 mb-6">
+  <select name="client_id"
+          class="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-300
+                 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+    <option value="">All clients</option>
+    {% for c in clients %}
+    <option value="{{ c.id }}" {% if sel_client == c.id %}selected{% endif %}>{{ c.folder_name }}</option>
+    {% endfor %}
+  </select>
+  <input name="q" type="search" value="{{ query }}" placeholder="Search documents…"
+         autofocus
+         class="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-sm text-gray-300
+                focus:outline-none focus:ring-2 focus:ring-indigo-500 placeholder-gray-500"/>
+  <button type="submit"
+          class="bg-indigo-600 hover:bg-indigo-500 text-white px-5 py-2 rounded-lg text-sm transition-colors">
+    Search
+  </button>
+</form>
+
+{% if query and not results %}
+<div class="text-gray-500 text-sm text-center py-12">
+  No documents found for "{{ query }}". Try different keywords or run the indexer in Settings.
+</div>
+{% endif %}
+
+{% if results %}
+<p class="text-xs text-gray-500 mb-3">{{ results|length }} result(s) for "{{ query }}"</p>
+<div class="space-y-3">
+  {% for r in results %}
+  <a href="/clients/{{ r.get('client_id','') }}#doc-{{ r.id }}"
+     class="block bg-gray-900 border border-gray-800 hover:border-indigo-600/50 rounded-xl p-4 transition-all group">
+    <div class="flex items-start justify-between gap-3 mb-1">
+      <div>
+        <span class="text-sm font-medium text-gray-200 group-hover:text-white">{{ r.filename }}</span>
+        {% if r.category %}
+        <span class="ml-2 text-xs text-gray-500">{{ r.category }}</span>
+        {% endif %}
+      </div>
+      <span class="text-xs text-indigo-400 flex-shrink-0">{{ r.folder_name }}</span>
+    </div>
+    {% if r.snippet %}
+    <p class="text-xs text-gray-500 leading-relaxed line-clamp-2">{{ r.snippet|safe }}</p>
+    {% endif %}
+  </a>
+  {% endfor %}
+</div>
+{% endif %}
+{% endblock %}

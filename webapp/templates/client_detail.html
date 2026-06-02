@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+{% block title %}{{ client.folder_name }} — Kova Finance{% endblock %}
+
+{% block content %}
+<div x-data="{ preview: null, previewName: '' }">
+
+  <!-- Header -->
+  <div class="flex items-center gap-3 mb-6">
+    <a href="/dashboard" class="text-gray-500 hover:text-gray-300 transition-colors">
+      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
+      </svg>
+    </a>
+    <div>
+      <h1 class="text-xl font-semibold text-gray-100">{{ client.folder_name }}</h1>
+      <p class="text-sm text-gray-500">{{ stats.total }} documents</p>
+    </div>
+    {% if missing %}
+    <div class="ml-auto flex flex-wrap gap-1">
+      {% for m in missing %}
+      <span class="text-xs px-2 py-1 rounded bg-red-900/40 text-red-400 border border-red-800">
+        Missing: {{ m }}
+      </span>
+      {% endfor %}
+    </div>
+    {% endif %}
+  </div>
+
+  <div class="flex gap-6 h-[calc(100vh-10rem)]">
+
+    <!-- Left: Document tree -->
+    <div class="w-72 flex-shrink-0 space-y-2 overflow-y-auto scrollbar-thin pr-1">
+      {% set cat_icons = {
+        'Documentos Pessoais': '🪪',
+        'Rendimentos': '💶',
+        'Extratos Bancários': '🏦',
+        'IRS': '🧾',
+        'Imóvel': '🏠',
+        'Mapa CRC': '📊',
+        'RGPD': '🔒',
+        'Proposta Crédito': '📋',
+        'Sem categoria': '❓',
+      } %}
+      {% for cat, docs in groups.items() %}
+      <div x-data="{ open: '{{ cat }}' !== 'Sem categoria' }" class="bg-gray-900 rounded-lg border border-gray-800">
+        <button @click="open=!open"
+                class="w-full flex items-center justify-between px-3 py-2.5 text-sm font-medium text-gray-300 hover:text-white">
+          <span class="flex items-center gap-2">
+            <span>{{ cat_icons.get(cat, '📁') }}</span>
+            <span>{{ cat }}</span>
+          </span>
+          <span class="flex items-center gap-2">
+            <span class="text-xs text-gray-500">{{ docs|length }}</span>
+            <svg class="w-3 h-3 transition-transform" :class="open ? 'rotate-180' : ''"
+                 fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+            </svg>
+          </span>
+        </button>
+        <div x-show="open" x-cloak class="border-t border-gray-800">
+          {% for doc in docs %}
+          <button @click="preview='{{ doc.id }}'; previewName='{{ doc.filename|replace("'","\\'")|truncate(35) }}'"
+                  class="w-full text-left px-3 py-2 text-xs text-gray-400 hover:bg-gray-800 hover:text-gray-200
+                         transition-colors flex items-center gap-2 group"
+                  :class="preview=='{{ doc.id }}' ? 'bg-gray-800 text-gray-200' : ''">
+            <svg class="w-3 h-3 flex-shrink-0 text-gray-600 group-hover:text-indigo-400" fill="currentColor" viewBox="0 0 20 20">
+              <path d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z"/>
+            </svg>
+            <span class="truncate">{{ doc.filename }}</span>
+          </button>
+          {% endfor %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+
+    <!-- Right: Preview pane -->
+    <div class="flex-1 bg-gray-900 rounded-xl border border-gray-800 overflow-hidden flex flex-col">
+      <div x-show="!preview" class="flex-1 flex items-center justify-center text-gray-600">
+        <div class="text-center">
+          <svg class="w-12 h-12 mx-auto mb-3 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+          </svg>
+          <p class="text-sm">Select a document to preview</p>
+        </div>
+      </div>
+      <template x-if="preview">
+        <div class="flex flex-col h-full">
+          <div class="flex items-center justify-between px-4 py-2.5 border-b border-gray-800">
+            <span x-text="previewName" class="text-sm text-gray-300 truncate"></span>
+            <div class="flex gap-2 flex-shrink-0">
+              <a :href="'/documents/' + preview + '/download'"
+                 class="text-xs text-gray-400 hover:text-indigo-400 px-2 py-1 rounded hover:bg-gray-800 transition-colors">
+                Download
+              </a>
+              <button @click="preview=null" class="text-gray-500 hover:text-gray-300 transition-colors">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                </svg>
+              </button>
+            </div>
+          </div>
+          <div class="flex-1 bg-gray-950">
+            <object :data="'/documents/' + preview + '/preview'" type="application/pdf"
+                    class="w-full h-full">
+              <img :src="'/documents/' + preview + '/preview'" class="max-w-full h-auto mx-auto"/>
+            </object>
+          </div>
+        </div>
+      </template>
+    </div>
+
+  </div>
+</div>
+{% endblock %}

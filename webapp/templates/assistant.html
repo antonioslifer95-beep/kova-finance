@@ -1,0 +1,135 @@
+{% extends "base.html" %}
+{% block title %}AI Assistant — Kova Finance{% endblock %}
+{% block nav_assistant %}active{% endblock %}
+
+{% block content %}
+<div class="flex flex-col h-[calc(100vh-6rem)]"
+     x-data="chatApp()" x-init="init()">
+
+  <!-- Header -->
+  <div class="flex items-center justify-between mb-4">
+    <h1 class="text-xl font-semibold">AI Assistant</h1>
+    <div class="flex items-center gap-3">
+      <select x-model="clientId"
+              class="bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-gray-300
+                     focus:outline-none focus:ring-2 focus:ring-indigo-500">
+        <option value="">Global (all clients)</option>
+        {% for c in clients %}
+        <option value="{{ c.id }}" {% if sel_client == c.id %}selected{% endif %}>{{ c.folder_name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+  </div>
+
+  {% if not has_key %}
+  <div class="mb-4 px-4 py-3 bg-amber-900/30 border border-amber-700/50 rounded-lg text-amber-300 text-sm flex items-start gap-2">
+    <svg class="w-4 h-4 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+    </svg>
+    <span>
+      No API key configured. Answers will show document excerpts only.
+      <a href="/settings" class="underline hover:text-amber-200">Add key in Settings</a> for full AI answers.
+    </span>
+  </div>
+  {% endif %}
+
+  <!-- Chat history -->
+  <div id="chat-box" class="flex-1 overflow-y-auto space-y-4 mb-4 scrollbar-thin pr-1">
+    {% if not history %}
+    <div class="flex items-center justify-center h-full text-gray-600">
+      <div class="text-center">
+        <div class="text-4xl mb-3">💬</div>
+        <p class="text-sm">Ask anything about your clients or documents.</p>
+        <p class="text-xs mt-1 text-gray-700">e.g. "What is Angel's NIF?" or "Show clients missing CRC map"</p>
+      </div>
+    </div>
+    {% endif %}
+    {% for msg in history %}
+    <div class="flex {% if msg.role == 'user' %}justify-end{% endif %}">
+      <div class="max-w-[70%] rounded-xl px-4 py-2.5 text-sm
+                  {% if msg.role == 'user' %}bg-indigo-600 text-white{% else %}bg-gray-800 text-gray-200{% endif %}">
+        {{ msg.content }}
+      </div>
+    </div>
+    {% endfor %}
+    <!-- Streaming messages appended here by Alpine -->
+    <template x-for="msg in messages" :key="msg.id">
+      <div class="flex" :class="msg.role==='user' ? 'justify-end' : ''">
+        <div class="max-w-[70%] rounded-xl px-4 py-2.5 text-sm"
+             :class="msg.role==='user' ? 'bg-indigo-600 text-white' : 'bg-gray-800 text-gray-200'">
+          <span x-html="msg.content.replace(/\n/g,'<br>')"></span>
+          <span x-show="msg.streaming" class="inline-block w-1.5 h-3.5 bg-indigo-400 ml-0.5 animate-pulse"></span>
+        </div>
+      </div>
+    </template>
+  </div>
+
+  <!-- Input -->
+  <div class="flex gap-2">
+    <input x-model="input" @keydown.enter.prevent="send()"
+           :disabled="loading"
+           placeholder="Ask a question about your clients or documents…"
+           class="flex-1 bg-gray-800 border border-gray-700 rounded-xl px-4 py-3 text-sm
+                  text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500
+                  disabled:opacity-50"/>
+    <button @click="send()" :disabled="loading || !input.trim()"
+            class="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white px-5 py-3
+                   rounded-xl transition-colors text-sm font-medium">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/>
+      </svg>
+    </button>
+  </div>
+</div>
+
+<script>
+function chatApp() {
+  return {
+    input: '', messages: [], loading: false, clientId: '{{ sel_client or "" }}',
+    init() { this.scrollBottom(); },
+    scrollBottom() {
+      this.$nextTick(() => {
+        const box = document.getElementById('chat-box');
+        if (box) box.scrollTop = box.scrollHeight;
+      });
+    },
+    async send() {
+      const q = this.input.trim();
+      if (!q || this.loading) return;
+      this.input = '';
+      this.loading = true;
+
+      const uid = Date.now();
+      this.messages.push({ id: uid, role: 'user', content: q, streaming: false });
+      const aId = uid + 1;
+      this.messages.push({ id: aId, role: 'assistant', content: '', streaming: true });
+      this.scrollBottom();
+
+      const params = new URLSearchParams({ q });
+      if (this.clientId) params.set('client_id', this.clientId);
+
+      try {
+        const es = new EventSource('/ai/stream?' + params.toString());
+        es.onmessage = (e) => {
+          if (e.data === '[DONE]') {
+            es.close();
+            const msg = this.messages.find(m => m.id === aId);
+            if (msg) msg.streaming = false;
+            this.loading = false;
+            this.scrollBottom();
+            return;
+          }
+          const chunk = JSON.parse(e.data);
+          const msg = this.messages.find(m => m.id === aId);
+          if (msg) msg.content += chunk;
+          this.scrollBottom();
+        };
+        es.onerror = () => { es.close(); this.loading = false; };
+      } catch (e) {
+        this.loading = false;
+      }
+    }
+  }
+}
+</script>
+{% endblock %}

@@ -1,0 +1,126 @@
+{% extends "base.html" %}
+{% block title %}Organizer — Kova Finance{% endblock %}
+{% block nav_organizer %}active{% endblock %}
+
+{% block content %}
+<div x-data="{ runId: null, running: false }">
+  <div class="flex items-center justify-between mb-6">
+    <div>
+      <h1 class="text-xl font-semibold">Document Organizer</h1>
+      <p class="text-gray-500 text-sm mt-0.5">Auto-moves files into the correct subfolders</p>
+    </div>
+    <form @submit.prevent="startRun()" class="flex items-center gap-3">
+      <select name="client" id="client-select"
+              class="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-300
+                     focus:outline-none focus:ring-2 focus:ring-indigo-500">
+        <option value="">All clients</option>
+        {% for c in clients %}
+        <option value="{{ c.folder_name }}">{{ c.folder_name }}</option>
+        {% endfor %}
+      </select>
+      <button type="submit" :disabled="running"
+              class="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50
+                     text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">
+        <svg class="w-4 h-4" :class="running ? 'animate-spin' : ''"
+             fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+        </svg>
+        <span x-text="running ? 'Running…' : 'Run Organizer'"></span>
+      </button>
+    </form>
+  </div>
+
+  <!-- Live log -->
+  <div id="log-container" x-show="runId !== null" x-cloak class="mb-6">
+    <div class="bg-gray-900 rounded-xl border border-gray-800 p-4">
+      <div class="flex items-center gap-2 mb-3">
+        <div class="w-2 h-2 rounded-full bg-green-400 animate-pulse" x-show="running"></div>
+        <span class="text-sm font-medium text-gray-300">Live output</span>
+      </div>
+      <div id="log-box"
+           class="font-mono text-xs text-green-400 bg-gray-950 rounded-lg p-3 h-56 overflow-y-auto scrollbar-thin whitespace-pre-wrap">
+      </div>
+    </div>
+  </div>
+
+  <!-- Unorganized files -->
+  {% if undone %}
+  <div class="mb-6">
+    <h2 class="text-base font-medium text-gray-300 mb-3">
+      Unorganized files ({{ undone|length }})
+    </h2>
+    <div class="bg-gray-900 rounded-xl border border-gray-800 divide-y divide-gray-800">
+      {% for doc in undone %}
+      <div class="flex items-center justify-between px-4 py-2.5">
+        <div>
+          <p class="text-sm text-gray-300">{{ doc.filename }}</p>
+          <p class="text-xs text-gray-600">{{ doc.folder_name }}</p>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% else %}
+  <div class="mb-6 px-4 py-3 bg-green-900/20 border border-green-800/40 rounded-lg text-green-400 text-sm flex items-center gap-2">
+    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+    </svg>
+    All documents are organized.
+  </div>
+  {% endif %}
+
+  <!-- Recent runs -->
+  {% if runs %}
+  <h2 class="text-base font-medium text-gray-300 mb-3">Recent runs</h2>
+  <div class="bg-gray-900 rounded-xl border border-gray-800 divide-y divide-gray-800">
+    {% for run in runs %}
+    <div class="flex items-center justify-between px-4 py-3">
+      <div>
+        <span class="text-sm text-gray-300">{{ run.client_scope or 'All clients' }}</span>
+        <span class="text-xs text-gray-600 ml-2">{{ run.started_at[:16].replace('T',' ') }}</span>
+      </div>
+      <span class="text-xs px-2 py-0.5 rounded
+        {% if run.status == 'done' %}bg-green-900/40 text-green-400
+        {% elif run.status == 'error' %}bg-red-900/40 text-red-400
+        {% else %}bg-yellow-900/40 text-yellow-400{% endif %}">
+        {{ run.status }}
+      </span>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+</div>
+
+<script>
+async function startRun() {
+  const comp = Alpine.$data(document.querySelector('[x-data]'));
+  comp.running = true;
+  const client = document.getElementById('client-select').value;
+  const fd = new FormData();
+  if (client) fd.append('client', client);
+  const resp = await fetch('/organizer/run', { method: 'POST', body: fd });
+  const html = await resp.text();
+  // Extract run_id from SSE URL in returned HTML
+  const match = html.match(/stream\/(\d+)/);
+  if (!match) { comp.running = false; return; }
+  const runId = match[1];
+  comp.runId = runId;
+  const logBox = document.getElementById('log-box');
+  const es = new EventSource('/organizer/stream/' + runId);
+  es.onmessage = (e) => {
+    if (e.data === '[done]') {
+      es.close(); comp.running = false;
+      logBox.innerHTML += '<span class="text-indigo-400">✓ Done.</span>\n';
+      return;
+    }
+    logBox.innerHTML += escHtml(e.data) + '\n';
+    logBox.scrollTop = logBox.scrollHeight;
+  };
+  es.onerror = () => { es.close(); comp.running = false; };
+}
+function escHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+</script>
+{% endblock %}

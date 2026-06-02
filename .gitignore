@@ -1,0 +1,54 @@
+# Client document folders
+Alexandra SAS Costa Freitas/
+Alexandre Cardiga/
+Ana Jorge/
+André Gonçalves/
+Angel e Ana Isabel/
+Bruno e Elizbieta/
+Carolina e Pedro Pais/
+Catarina Azevedo/
+Daniel Sá Carneiro/
+Danilo Ramalho/
+Eduardo Faria/
+Elismeres e Sebastião/
+Fernanda e Carlos/
+Fernando e Milena/
+Fátima Campos/
+Gilberto Machado/
+Gonçalo Jorge/
+Ipshita and Ribal/
+Jeferson Silva/
+Joaquim Silva/
+José Lopes/
+Júlia Cachinhama/
+Luís Salgado/
+Maiana Gonçalves e Paulo Tadeu/
+Maria João Sousa/
+Paulo Macário e Maria Isabel/
+Pedro e Vera/
+Standby/
+Susana Lourenço/
+Tiago e Dalila/
+Tiago e Patrícia/
+Vanessa e Lucas/
+Vanessa e Marco/
+Victoria Musallam/
+despesas valencia/
+_claude_review/
+
+# Secrets and database
+webapp/kova.db
+webapp/.secret_key
+
+# Generated files
+organize_plan.json
+claude_review.json
+claude_categorizations.json
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Claude Code
+.claude/
