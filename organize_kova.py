@@ -92,8 +92,7 @@ def _subclient_has_content(folder: Path) -> bool:
     True when a subfolder is worth treating as a sub-client:
     - has loose files at its root, OR
     - has files inside non-standard sub-subfolders (dissolve fodder), OR
-    - already has at least one standard subfolder that itself contains files
-      (i.e. was previously organised as a sub-client and still has docs).
+    - already has standard subfolders (even empty) — signals prior sub-client setup.
     """
     standard_lower = {s.lower() for s in STANDARD_FOLDERS}
     for item in folder.iterdir():
@@ -101,13 +100,10 @@ def _subclient_has_content(folder: Path) -> bool:
             return True  # loose file
         if item.is_dir():
             if item.name.lower() in standard_lower:
-                # Standard subfolder — only counts if it has files
-                if any(f.is_file() for f in item.rglob("*") if f.suffix.lower() not in SKIP_EXTENSIONS):
-                    return True
+                return True  # previously set up as sub-client
             else:
-                # Non-standard sub-subfolder (dissolve fodder)
                 if any(f.is_file() for f in item.rglob("*") if f.suffix.lower() not in SKIP_EXTENSIONS):
-                    return True
+                    return True  # non-standard subfolder with files
     return False
 
 
@@ -500,6 +496,31 @@ def find_inplace_image_merges(client_folder: Path) -> List[Dict]:
     return merges
 
 
+def find_misrouted_files(client_folder: Path, subclients: List[Path]) -> List[Dict]:
+    """
+    Find files sitting in root standard folders that belong to a specific sub-client
+    (identified by the sub-client folder name appearing as a word in the filename).
+    Returns move-plan dicts to route them into the correct sub-client standard folder.
+    """
+    moves = []
+    for std in STANDARD_FOLDERS:
+        std_folder = client_folder / std
+        if not std_folder.exists():
+            continue
+        for f in std_folder.iterdir():
+            if not f.is_file() or f.suffix.lower() in SKIP_EXTENSIONS:
+                continue
+            stem_norm = normalize_stem(f.stem)
+            for subclient in subclients:
+                sc_name = normalize_stem(subclient.name)
+                if re.search(r'\b' + re.escape(sc_name) + r'\b', stem_norm):
+                    target = subclient / std / f.name
+                    if target.resolve() != f.resolve():
+                        moves.append({"from": str(f), "to": str(target)})
+                    break
+    return moves
+
+
 def find_duplicates(client_folder: Path) -> List[Tuple[Path, Path]]:
     """
     Find files with identical MD5 within a client folder.
@@ -602,6 +623,11 @@ def scan_client(
                 "from": str(file_path),
                 "to": str(target),
             })
+
+    # Migrate files from root standard folders to per-sub-client folders
+    subclients = _get_subclient_folders(client_folder)
+    for m in find_misrouted_files(client_folder, subclients):
+        plan["moves"].append(m)
 
     # Also merge image groups that are already inside standard subfolders
     for mg in find_inplace_image_merges(client_folder):
