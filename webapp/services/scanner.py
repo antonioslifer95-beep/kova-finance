@@ -41,6 +41,8 @@ def _upsert_client(db, folder: Path, standby: bool):
     _sync_documents(db, folder, client_id)
 
 def _sync_documents(db, client_folder: Path, client_id: int):
+    seen: set = set()
+
     for path in client_folder.rglob("*"):
         if not path.is_file():
             continue
@@ -58,6 +60,7 @@ def _sync_documents(db, client_folder: Path, client_id: int):
             category  = parts[1]
 
         rel_path = str(path.relative_to(BASE_DIR))
+        seen.add(rel_path)
         stat = path.stat()
         db.execute(
             """INSERT INTO documents(client_id,category,subclient,filename,rel_path,abs_path,
@@ -72,6 +75,16 @@ def _sync_documents(db, client_folder: Path, client_id: int):
              stat.st_size, str(stat.st_mtime),
              MIME.get(path.suffix.lower(), "application/octet-stream"))
         )
+
+    # Purge DB records for files that no longer exist on disk
+    if seen:
+        placeholders = ",".join("?" * len(seen))
+        db.execute(
+            f"DELETE FROM documents WHERE client_id=? AND rel_path NOT IN ({placeholders})",
+            [client_id, *seen],
+        )
+    else:
+        db.execute("DELETE FROM documents WHERE client_id=?", (client_id,))
 
 def client_stats(db, client_id: int) -> dict:
     rows = db.execute(
