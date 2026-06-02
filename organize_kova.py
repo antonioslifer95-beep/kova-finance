@@ -242,6 +242,157 @@ _COMPILED_RULES: Dict[str, List] = {
     for cat, patterns in CATEGORY_RULES.items()
 }
 
+RENAME_PROMPT = """\
+This is a page from a Portuguese mortgage dossier.
+Category folder: {category}
+{person_line}
+Current filename: {filename}
+
+Generate a standardized filename stem (NO extension) following these exact rules:
+
+Rendimentos:
+  payslip/recibo de vencimento  →  RecVenc_YYYY-MM_Person
+  employer declaration          →  DeclPatronal_Person
+  work contract                 →  ContratoTrabalho_Person
+  income declaration            →  DeclRendimentos_YYYY_Person
+  social-manager declaration    →  DeclSocioGerente_Person
+  salary declaration            →  DeclInternaPagSalarial_Person
+
+Extratos Bancários:
+  bank statement                →  Extrato_YYYY-MM_BankName_Person
+    (joint/no clear person      →  Extrato_YYYY-MM_BankName)
+  short bank names: BCP BPI CGD Santander NovoBanco Revolut Wise ActivoBank Montepio Itau
+
+IRS:
+  tax declaration               →  IRS_YYYY_Person
+  liquidation note              →  NotaLiq_IRS_YYYY_Person
+  IES report                    →  IES_YYYY_Person
+
+Documentos Pessoais:
+  ID card (cartão cidadão/CC)   →  CC_Person
+  passport                      →  Passaporte_Person
+  residence permit              →  TituloResidencia_Person
+  address proof                 →  CompMorada_Person
+  IBAN proof                    →  CompIBAN_BankName_Person
+  tax domicile                  →  DomicilioFiscal_Person
+  debt-free certificate         →  CertNaoDivida_Person
+  career history                →  CarreiraContributiva_Person
+  fiscal certificate            →  CertNaoDividaFinancas_Person
+  SS certificate                →  CertNaoDividaSS_Person
+
+Mapa CRC:
+  CRC map                       →  MapaCRC_YYYY-MM_Person
+
+RGPD:
+  consent form                  →  RGPD_Person
+
+Imóvel:
+  property certificate          →  CertidaoPredial
+  land register (caderneta)     →  CadernaPredial
+  energy certificate            →  CertificadoEnergetico
+  usage licence                 →  LicencaUtilizacao
+  property plans                →  Plantas
+  CPCV                          →  CPCV
+  purchase deed (escritura)     →  Escritura
+  unit sheet (unidade aloj.)    →  UnidAloj
+  addendum                      →  Adenda
+
+Proposta Crédito:
+  credit proposal               →  Proposta_BankName_YYYY-MM
+  simulation                    →  Simulacao_BankName_YYYY-MM
+  bank form                     →  FormularioBanco_BankName
+  borrower declaration          →  DeclaracaoMutuarios
+
+Rules:
+- Use _ to separate parts. No spaces. No special chars except - for dates.
+- YYYY-MM = year and month shown in the document (e.g. 2025-11)
+- Person = the person's first name as shown in the dossier (e.g. Tiago, Dalila)
+- BankName = short name of the bank/institution
+- If a detail is not visible, omit that part
+- Reply with ONLY the filename stem, nothing else
+"""
+
+
+def _is_standard_name(stem: str) -> bool:
+    """True if the filename already matches our strict naming convention."""
+    for patterns in _COMPILED_RULES.values():
+        for pat in patterns:
+            if pat.match(stem):
+                return True
+    return False
+
+
+def _sanitize_stem(raw: str) -> Optional[str]:
+    """Clean an AI-returned filename stem: remove path chars, strip quotes."""
+    s = raw.strip().strip('"\'').strip()
+    s = re.sub(r'[/\\<>:"|?*]', '', s)
+    # Remove extension if AI accidentally included it
+    if '.' in s:
+        s = s.rsplit('.', 1)[0]
+    return s.strip() or None
+
+
+def generate_standard_name(path: Path, category: str, person: Optional[str], ai_client) -> Optional[str]:
+    """
+    Ask Claude to generate a standardized filename for an already-organized file.
+    Returns the new full filename (stem + original extension), or None if unchanged/failed.
+    """
+    ext = path.suffix          # preserve original extension (including case)
+    ext_lower = ext.lower()
+
+    # Render first page to JPEG
+    b64 = media_type = None
+    if ext_lower == ".pdf":
+        try:
+            import fitz
+            doc = fitz.open(str(path))
+            pix = doc[0].get_pixmap(dpi=100)
+            b64 = base64.standard_b64encode(pix.tobytes("jpeg")).decode()
+            media_type = "image/jpeg"
+            doc.close()
+        except Exception as e:
+            print(f"    [rename] PDF render error {path.name}: {e}")
+            return None
+    elif ext_lower in IMAGE_EXTS:
+        media_type = "image/png" if ext_lower == ".png" else "image/jpeg"
+        try:
+            with open(path, "rb") as f:
+                b64 = base64.standard_b64encode(f.read()).decode()
+        except Exception:
+            return None
+    else:
+        return None
+
+    person_line = f"Person: {person}" if person else "Person: (shared / not specified)"
+    prompt = RENAME_PROMPT.format(
+        category=category,
+        person_line=person_line,
+        filename=path.name,
+    )
+    try:
+        resp = ai_client.messages.create(
+            model=VISION_MODEL,
+            max_tokens=60,
+            messages=[{
+                "role": "user",
+                "content": [
+                    {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": b64}},
+                    {"type": "text", "text": prompt},
+                ],
+            }],
+        )
+        raw_stem = resp.content[0].text.strip()
+        new_stem = _sanitize_stem(raw_stem)
+        if not new_stem:
+            return None
+        new_name = new_stem + ext   # keep original extension
+        if new_name == path.name:
+            return None             # already has the right name
+        return new_name
+    except Exception as e:
+        print(f"    [rename] API error {path.name}: {e}")
+        return None
+
 # Normalized rules — matched against accent-stripped, lower-cased, space-normalized names.
 # Catches natural-language filenames like "Mapa CRC - Tiago", "Declaração Patronal - Dalila".
 NORMALIZED_RULES: Dict[str, List[str]] = {
@@ -711,6 +862,7 @@ def scan_client(
         "merges": [],
         "duplicates": [],
         "uncategorized": [],
+        "renames": [],
     }
 
     # Collect standard folders to create — root level
@@ -801,7 +953,73 @@ def scan_client(
             "delete": str(delete),
         })
 
+    # ── Rename planning ─────────────────────────────────────────────────────
+    if use_vision and ai_client:
+        _plan_renames(plan, client_folder, all_subclients, ai_client)
+
     return plan
+
+
+def _plan_renames(plan: Dict, client_folder: Path, all_subclients: List[Path], ai_client) -> None:
+    """
+    Populate plan["renames"] with standardized-name proposals.
+
+    Two passes:
+    1. Files already in their final organized location.
+    2. Files scheduled to be moved — rename at the target path (AI reads source).
+    """
+    VISION_EXTS = IMAGE_EXTS | {".pdf", ".PDF"}
+    already_planned: set = set()   # avoid double-planning same target path
+
+    def _add_rename(source_path: Path, target_path: Path, category: str, person: Optional[str]):
+        key = str(target_path)
+        if key in already_planned:
+            return
+        if source_path.suffix.lower() not in {e.lower() for e in VISION_EXTS}:
+            return
+        if _is_standard_name(source_path.stem):
+            return
+        print(f"    [rename] {source_path.name}")
+        new_name = generate_standard_name(source_path, category, person, ai_client)
+        if new_name:
+            plan["renames"].append({
+                "path": str(target_path),
+                "new_name": new_name,
+            })
+            already_planned.add(key)
+
+    # Pass 1: files already organized at root standard folders
+    for std in STANDARD_FOLDERS:
+        std_folder = client_folder / std
+        if not std_folder.exists():
+            continue
+        for f in std_folder.iterdir():
+            if f.is_file() and f.suffix.lower() not in SKIP_EXTENSIONS:
+                _add_rename(f, f, std, None)
+
+    # Pass 1b: files already organized inside sub-client standard folders
+    for sc in all_subclients:
+        for std in STANDARD_FOLDERS:
+            std_folder = sc / std
+            if not std_folder.exists():
+                continue
+            for f in std_folder.iterdir():
+                if f.is_file() and f.suffix.lower() not in SKIP_EXTENSIONS:
+                    _add_rename(f, f, std, sc.name)
+
+    # Pass 2: files being moved in this run — rename at target after move
+    for move in plan["moves"]:
+        src = Path(move["from"])
+        target = Path(move["to"])
+        rel = target.relative_to(client_folder)
+        parts = rel.parts
+        if len(parts) >= 2 and parts[0] in STANDARD_FOLDERS:
+            category, person = parts[0], None
+        elif len(parts) >= 3 and parts[1] in STANDARD_FOLDERS:
+            person, category = parts[0], parts[1]
+        else:
+            continue
+        _add_rename(src, target, category, person)
 
 
 # ─── Report ────────────────────────────────────────────────────────────────
@@ -812,6 +1030,7 @@ def print_plan(plans: List[Dict]) -> None:
     total_dupes   = sum(len(p["duplicates"])    for p in plans)
     total_uncat   = sum(len(p["uncategorized"]) for p in plans)
     total_folders = sum(len(p["new_folders"])   for p in plans)
+    total_renames = sum(len(p.get("renames",[])) for p in plans)
 
     sep = "=" * 70
     print(f"\n{sep}")
@@ -820,6 +1039,7 @@ def print_plan(plans: List[Dict]) -> None:
     print(f"  Clients scanned  : {len(plans)}")
     print(f"  New folders      : {total_folders}")
     print(f"  Files to move    : {total_moves}")
+    print(f"  Files to rename  : {total_renames}")
     print(f"  Image -> PDF merge: {total_merges} group(s)")
     print(f"  True duplicates  : {total_dupes}")
     print(f"  Uncategorized    : {total_uncat}")
@@ -828,7 +1048,7 @@ def print_plan(plans: List[Dict]) -> None:
     for p in plans:
         has_work = any([
             p["new_folders"], p["moves"], p["merges"],
-            p["duplicates"], p["uncategorized"]
+            p["duplicates"], p["uncategorized"], p.get("renames", [])
         ])
         if not has_work:
             continue
@@ -876,6 +1096,12 @@ def print_plan(plans: List[Dict]) -> None:
             for u in p["uncategorized"]:
                 f = u["file"] if isinstance(u, dict) else u
                 print(f"       {Path(f).name}")
+
+        if p.get("renames"):
+            for r in p["renames"]:
+                old = Path(r["path"]).name
+                print(f"   REN   {old}")
+                print(f"     ->  {r['new_name']}")
 
     print(f"\n{sep}")
     print("  Run with --apply to execute.  Plan saved to organize_plan.json")
@@ -980,6 +1206,29 @@ def apply_plan(plans: List[Dict]) -> None:
                 delete_path.unlink()
                 print(f"  del dupe  {delete_path.name}")
                 actions += 1
+
+        # Rename files to standardized names
+        for r in p.get("renames", []):
+            old_path = Path(r["path"])
+            if not old_path.exists():
+                continue
+            new_stem = Path(r["new_name"]).stem
+            new_ext  = Path(r["new_name"]).suffix or old_path.suffix
+            new_path = old_path.parent / (new_stem + new_ext)
+            if new_path == old_path:
+                continue
+            # Resolve conflicts: append _v2, _v3, …
+            if new_path.exists():
+                v = 2
+                while new_path.exists() and v <= 20:
+                    new_path = old_path.parent / f"{new_stem}_v{v}{new_ext}"
+                    v += 1
+            if new_path.exists():
+                print(f"  SKIP rename (conflict)  {old_path.name}")
+                continue
+            old_path.rename(new_path)
+            print(f"  rename  {old_path.name}  ->  {new_path.name}")
+            actions += 1
 
         # Remove empty leftover folders (dissolved dirs, old processados, etc.)
         removed = cleanup_empty_folders(Path(p["client_folder"]))
