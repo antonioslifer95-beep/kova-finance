@@ -112,6 +112,8 @@ async function startRun() {
     if (e.data === '[done]') {
       es.close(); comp.running = false;
       logBox.innerHTML += '<span class="text-indigo-400">✓ Done.</span>\n';
+      logBox.scrollTop = logBox.scrollHeight;
+      setTimeout(() => window.location.reload(), 1200);
       return;
     }
     logBox.innerHTML += escHtml(e.data) + '\n';

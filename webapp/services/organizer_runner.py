@@ -19,12 +19,9 @@ def start_run(client_name: str = None) -> int:
 
     def _worker():
         script = BASE_DIR / "organize_kova.py"
-        api_key = setting("anthropic_api_key")
+        # The organizer reads the API key from the DB itself — no need to pass it here.
+        # Only pass --client if scoped; always apply.
         cmd = [sys.executable, str(script), "--apply"]
-        if api_key:
-            cmd += ["--api-key", api_key]
-        else:
-            cmd += ["--skip-vision"]
         if client_name:
             cmd += ["--client", client_name]
         log_lines = []
@@ -44,6 +41,15 @@ def start_run(client_name: str = None) -> int:
             status = "error"
             log_lines.append(f"ERROR: {e}")
             q.put(f"ERROR: {e}")
+
+        # Re-sync the DB so the webapp reflects any moved/created files immediately
+        try:
+            from services.scanner import sync_all
+            q.put("[scanner] Updating document database...")
+            sync_all()
+            q.put("[scanner] Done.")
+        except Exception as e:
+            q.put(f"[scanner] Error: {e}")
 
         q.put(None)  # sentinel
         with get_db() as db:

@@ -16,7 +16,7 @@ def organizer_page(request: Request):
     with get_db() as db:
         undone = unorganized_docs(db)
         runs   = organizer_runner.recent_runs(db)
-        clients = db.execute("SELECT id, folder_name FROM clients ORDER BY folder_name").fetchall()
+        clients = db.execute("SELECT id, folder_name FROM clients WHERE is_standby=0 ORDER BY folder_name").fetchall()
     return tmpl.TemplateResponse("organizer.html", {
         "request": request, "user": user,
         "undone": [dict(u) for u in undone],
