@@ -1,10 +1,11 @@
 from collections import defaultdict, OrderedDict
 from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from auth import current_user
 from database import get_db
 from services.scanner import client_stats
+from services import identifier as _identifier
 from config import TEMPLATE_DIR, STANDARD_FOLDERS, REQUIRED_CATEGORIES, REQUIRED_PER_PERSON, REQUIRED_SHARED
 
 router = APIRouter()
@@ -46,6 +47,81 @@ def _compute_missing(db, client_id: int, stats: dict) -> list[str]:
         if req not in all_cats:
             missing.add(req)
     return sorted(missing)
+
+
+@router.get("/clients/pending-partial", response_class=HTMLResponse)
+def pending_partial(request: Request):
+    current_user(request)
+    pending = _identifier.get_pending()
+    return tmpl.TemplateResponse("_pending_partial.html", {
+        "request": request, "pending": pending,
+    })
+
+
+@router.post("/clients/new", response_class=HTMLResponse)
+async def new_client(request: Request):
+    current_user(request)
+    folder_name = _identifier.create_pending()
+    from config import BASE_DIR
+    folder_path = str(BASE_DIR / folder_name)
+    pending = _identifier.get_pending()
+    return tmpl.TemplateResponse("_pending_partial.html", {
+        "request": request, "pending": pending,
+        "new_folder_path": folder_path,
+    })
+
+
+@router.post("/clients/identify", response_class=HTMLResponse)
+async def identify_client(request: Request):
+    current_user(request)
+    form = await request.form()
+    folder_name = form.get("folder_name")
+    run_id = _identifier.start_identification(folder_name)
+    return HTMLResponse(
+        f'<div id="id-log-{run_id}" '
+        f'class="font-mono text-xs text-green-400 bg-gray-900 rounded p-3 h-40 overflow-y-auto mt-2"'
+        f' hx-ext="sse" sse-connect="/clients/identify/stream/{run_id}"'
+        f' sse-swap="message" hx-swap="beforeend scroll:bottom"></div>'
+    )
+
+
+@router.get("/clients/identify/stream/{run_id}")
+def identify_stream(request: Request, run_id: int):
+    current_user(request)
+    return StreamingResponse(
+        _identifier.stream_run(run_id),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@router.post("/clients/identify/confirm", response_class=HTMLResponse)
+async def confirm_identification(request: Request):
+    current_user(request)
+    form = await request.form()
+    folder_name    = form.get("folder_name")
+    confirmed_name = form.get("confirmed_name", "").strip()
+    if not confirmed_name:
+        return HTMLResponse("<p class='text-red-400 text-xs'>Name cannot be empty.</p>")
+    run_id = _identifier.confirm_identification(folder_name, confirmed_name)
+    return HTMLResponse(
+        f'<div id="id-log-{run_id}" '
+        f'class="font-mono text-xs text-green-400 bg-gray-900 rounded p-3 h-40 overflow-y-auto mt-2"'
+        f' hx-ext="sse" sse-connect="/clients/identify/stream/{run_id}"'
+        f' sse-swap="message" hx-swap="beforeend scroll:bottom"></div>'
+    )
+
+
+@router.post("/clients/identify/cancel", response_class=HTMLResponse)
+async def cancel_identification(request: Request):
+    current_user(request)
+    form = await request.form()
+    folder_name = form.get("folder_name")
+    _identifier.cancel_pending(folder_name)
+    pending = _identifier.get_pending()
+    return tmpl.TemplateResponse("_pending_partial.html", {
+        "request": request, "pending": pending,
+    })
 
 
 @router.get("/", response_class=HTMLResponse)

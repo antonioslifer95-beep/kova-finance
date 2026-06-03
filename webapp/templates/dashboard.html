@@ -3,19 +3,38 @@
 {% block nav_dashboard %}active{% endblock %}
 
 {% block content %}
-<div class="flex items-center justify-between mb-8">
+<div class="flex items-center justify-between mb-6">
   <div>
     <h1 class="text-2xl font-semibold text-gray-100">Clients</h1>
     <p class="text-gray-500 text-sm mt-0.5">{{ cards|length }} active clients</p>
   </div>
-  <a href="/organizer"
-     class="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm
-            font-medium px-4 py-2 rounded-lg transition-colors">
-    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
-    </svg>
-    Organizer
-  </a>
+  <div class="flex items-center gap-2">
+    <button hx-post="/clients/new"
+            hx-target="#pending-section"
+            hx-swap="innerHTML"
+            class="flex items-center gap-2 bg-gray-800 hover:bg-gray-700 border border-gray-700
+                   text-gray-200 text-sm font-medium px-4 py-2 rounded-lg transition-colors">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+      </svg>
+      New Client
+    </button>
+    <a href="/organizer"
+       class="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm
+              font-medium px-4 py-2 rounded-lg transition-colors">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+      </svg>
+      Organizer
+    </a>
+  </div>
+</div>
+
+<!-- Pending new clients (polls every 5s) -->
+<div id="pending-section"
+     hx-get="/clients/pending-partial"
+     hx-trigger="load, every 5s"
+     hx-swap="innerHTML">
 </div>
 
 <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">

@@ -1,0 +1,99 @@
+{% if new_folder_path %}
+<div id="new-folder-toast"
+     class="mb-3 flex items-start gap-3 bg-indigo-950 border border-indigo-700 rounded-lg px-4 py-3 text-sm"
+     x-data="{ open: true }" x-show="open">
+  <svg class="w-4 h-4 mt-0.5 flex-shrink-0 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
+  </svg>
+  <div class="flex-1 min-w-0">
+    <p class="text-indigo-200 font-medium">Folder created — paste your files here:</p>
+    <p class="text-indigo-400 font-mono text-xs mt-0.5 break-all">{{ new_folder_path }}</p>
+  </div>
+  <button @click="open = false" class="text-indigo-500 hover:text-indigo-300 flex-shrink-0">✕</button>
+</div>
+{% endif %}
+
+{% for p in pending %}
+<div class="mb-3 border rounded-lg px-4 py-3
+  {% if p.status == 'conflict' %}bg-yellow-950 border-yellow-700
+  {% elif p.status == 'error' %}bg-red-950 border-red-800
+  {% elif p.status == 'identifying' %}bg-gray-900 border-gray-700
+  {% else %}bg-gray-900 border-gray-800{% endif %}">
+
+  <div class="flex items-center justify-between gap-4">
+    <div class="flex items-center gap-2 min-w-0">
+      {% if p.status == 'waiting' %}
+        <span class="w-2 h-2 rounded-full bg-gray-600 flex-shrink-0"></span>
+        <span class="text-gray-400 text-sm">Waiting for files…</span>
+      {% elif p.status == 'ready' %}
+        <span class="w-2 h-2 rounded-full bg-green-500 flex-shrink-0 animate-pulse"></span>
+        <span class="text-gray-200 text-sm">
+          <span class="font-medium">{{ p.file_count }} file(s) ready</span>
+          <span class="text-gray-500 ml-1 text-xs">{{ p.folder_name }}</span>
+        </span>
+      {% elif p.status == 'identifying' %}
+        <svg class="w-4 h-4 text-indigo-400 animate-spin flex-shrink-0" fill="none" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+        </svg>
+        <span class="text-indigo-300 text-sm">Identifying…</span>
+      {% elif p.status == 'conflict' %}
+        <svg class="w-4 h-4 text-yellow-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
+        </svg>
+        <span class="text-yellow-200 text-sm font-medium">Name conflict detected</span>
+      {% elif p.status == 'error' %}
+        <svg class="w-4 h-4 text-red-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+        </svg>
+        <span class="text-red-300 text-sm">Error</span>
+      {% endif %}
+    </div>
+
+    <div class="flex items-center gap-2 flex-shrink-0">
+      {% if p.status == 'ready' %}
+        <form hx-post="/clients/identify" hx-target="#id-slot-{{ p.id }}" hx-swap="innerHTML">
+          <input type="hidden" name="folder_name" value="{{ p.folder_name }}">
+          <button type="submit"
+                  class="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium px-3 py-1.5 rounded-lg transition-colors">
+            Identify
+          </button>
+        </form>
+      {% endif %}
+      {% if p.status not in ('identifying',) %}
+        <form hx-post="/clients/identify/cancel" hx-target="#pending-section" hx-swap="innerHTML">
+          <input type="hidden" name="folder_name" value="{{ p.folder_name }}">
+          <button type="submit"
+                  class="text-gray-500 hover:text-gray-300 text-xs px-2 py-1.5 rounded transition-colors">
+            Cancel
+          </button>
+        </form>
+      {% endif %}
+    </div>
+  </div>
+
+  {% if p.status == 'conflict' %}
+  <div class="mt-3 border-t border-yellow-800 pt-3 space-y-2">
+    <p class="text-yellow-300 text-xs">
+      AI detected: <strong>{{ p.detected_name }}</strong>
+      — similar to existing folder: <strong class="text-yellow-200">{{ p.conflict_with }}</strong>
+    </p>
+    <p class="text-yellow-500 text-xs">Edit the name if needed, then confirm to create as a new client.</p>
+    <form hx-post="/clients/identify/confirm" hx-target="#id-slot-{{ p.id }}" hx-swap="innerHTML"
+          class="flex items-center gap-2 mt-1">
+      <input type="hidden" name="folder_name" value="{{ p.folder_name }}">
+      <input type="text" name="confirmed_name" value="{{ p.detected_name }}"
+             class="flex-1 bg-gray-800 border border-yellow-700 text-gray-100 text-xs rounded px-2 py-1.5
+                    focus:outline-none focus:border-yellow-500">
+      <button type="submit"
+              class="bg-yellow-600 hover:bg-yellow-500 text-white text-xs font-medium px-3 py-1.5 rounded-lg transition-colors">
+        Confirm
+      </button>
+    </form>
+  </div>
+  {% endif %}
+
+  <!-- SSE log slot for this pending entry -->
+  <div id="id-slot-{{ p.id }}"></div>
+</div>
+{% endfor %}

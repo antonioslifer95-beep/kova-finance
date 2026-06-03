@@ -74,6 +74,18 @@ CREATE TABLE IF NOT EXISTS organizer_runs (
     client_scope TEXT
 );
 
+CREATE TABLE IF NOT EXISTS pending_clients (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    folder_name   TEXT NOT NULL UNIQUE,
+    folder_path   TEXT NOT NULL,
+    status        TEXT NOT NULL DEFAULT 'waiting',
+    file_count    INTEGER NOT NULL DEFAULT 0,
+    detected_name TEXT,
+    conflict_with TEXT,
+    created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at    TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE INDEX IF NOT EXISTS idx_docs_client    ON documents(client_id);
 CREATE INDEX IF NOT EXISTS idx_docs_category  ON documents(client_id, category);
 CREATE INDEX IF NOT EXISTS idx_chat_user      ON chat_messages(user_id, client_id);

@@ -35,10 +35,16 @@ async def lifespan(app: FastAPI):
     print(f"[KOVA] Queued {n} documents for indexing.")
 
     if setting("watcher_enabled") == "1":
-        from services.scanner import _upsert_client as _sc
+        from pathlib import Path as _Path
+        def _on_fs_change(folder: _Path):
+            if folder.name.startswith("_novo"):
+                from services.identifier import refresh_file_count
+                refresh_file_count(folder.name)
+            else:
+                sync_all()
         watcher.start(
-            scanner_sync_fn=lambda folder: sync_all(),
-            indexer_single_fn=lambda path: None,  # indexer handles it via scanner resync
+            scanner_sync_fn=_on_fs_change,
+            indexer_single_fn=lambda path: None,
         )
 
     yield

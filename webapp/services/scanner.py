@@ -16,6 +16,8 @@ def sync_all():
                 continue
             if item.name.lower() in SKIP_NAMES:
                 continue
+            if item.name.startswith("_"):
+                continue  # _novo_* pending folders — handled by identifier service
             _upsert_client(db, item, standby=False)
 
         standby = BASE_DIR / "Standby"
