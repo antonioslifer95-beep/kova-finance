@@ -1,4 +1,6 @@
+import shutil
 from collections import defaultdict, OrderedDict
+from pathlib import Path
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
@@ -122,6 +124,23 @@ async def cancel_identification(request: Request):
     return tmpl.TemplateResponse("_pending_partial.html", {
         "request": request, "pending": pending,
     })
+
+
+@router.post("/clients/{client_id}/delete", response_class=HTMLResponse)
+async def delete_client(request: Request, client_id: int):
+    current_user(request)
+    with get_db() as db:
+        client = db.execute("SELECT * FROM clients WHERE id=?", (client_id,)).fetchone()
+        if not client:
+            return HTMLResponse("")
+        folder_path = Path(client["folder_path"])
+        # FTS table has no FK cascade — delete manually
+        db.execute("DELETE FROM documents_fts WHERE client_id=?", (client_id,))
+        # Deletes client + documents (ON DELETE CASCADE)
+        db.execute("DELETE FROM clients WHERE id=?", (client_id,))
+    if folder_path.exists():
+        shutil.rmtree(str(folder_path))
+    return HTMLResponse("")   # HTMX swaps the card element with nothing
 
 
 @router.get("/", response_class=HTMLResponse)
