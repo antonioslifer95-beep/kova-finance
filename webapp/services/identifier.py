@@ -11,15 +11,11 @@ VISION_MODEL  = "claude-haiku-4-5-20251001"
 IMAGE_EXTS    = {".jpg", ".jpeg", ".png"}
 DOC_EXTS      = {".pdf"} | IMAGE_EXTS
 
-IDENTIFY_PROMPT = (
-    "You are looking at documents from a Portuguese mortgage application dossier.\n"
-    "Based on these documents, identify the full name(s) of the client(s).\n\n"
-    "Reply with ONLY the name(s):\n"
-    "- Single client: \"João Silva\"\n"
-    "- Couple/joint:  \"João Silva e Maria Santos\"\n\n"
-    "Use the name exactly as shown in official documents (ID card, passport, payslip).\n"
-    "For couples use \" e \" between names.\n"
-    "Reply with the name(s) only, nothing else."
+PER_DOC_ID_PROMPT = (
+    "Is this an identity document (CC cartão cidadão, passport, BI, "
+    "autorização de residência / título de residência)?\n"
+    "If YES: reply with ONLY the full name of the person exactly as written on the document.\n"
+    "If NO: reply with exactly: skip"
 )
 
 
@@ -161,6 +157,27 @@ def start_identification(folder_name: str) -> int:
     return run_id
 
 
+def _deduplicate_names(names: list) -> list:
+    """Remove names that are subsets of another name (same person, partial vs full name)."""
+    unique = []
+    for name in names:
+        norm_name = _norm(name)
+        tokens = set(t for t in norm_name.split() if len(t) >= 4)
+        is_dup = False
+        for existing in unique:
+            norm_existing = _norm(existing)
+            tokens_existing = set(t for t in norm_existing.split() if len(t) >= 4)
+            if tokens & tokens_existing:
+                is_dup = True
+                # Keep the longer (more complete) name
+                if len(name) > len(existing):
+                    unique[unique.index(existing)] = name
+                break
+        if not is_dup:
+            unique.append(name)
+    return unique
+
+
 def _run_identification(folder_name: str, q: queue.Queue):
     folder_path = BASE_DIR / folder_name
     q.put(f"Scanning {folder_name}...")
@@ -181,12 +198,12 @@ def _run_identification(folder_name: str, q: queue.Queue):
         q.put("ERROR: 'anthropic' package not installed.")
         return
 
-    # Pick up to 5 files — prefer PDFs
+    # Pick up to 6 files — prefer PDFs, then images
     files = sorted(
         [f for f in folder_path.iterdir()
          if f.is_file() and f.suffix.lower() in DOC_EXTS],
         key=lambda f: (0 if f.suffix.lower() == ".pdf" else 1, f.name)
-    )[:5]
+    )[:6]
 
     if not files:
         q.put("No documents found.")
@@ -196,37 +213,45 @@ def _run_identification(folder_name: str, q: queue.Queue):
             )
         return
 
-    q.put(f"Found {len(files)} document(s). Rendering for AI...")
+    q.put(f"Found {len(files)} document(s). Checking each for identity documents...")
 
-    content = []
-    rendered = 0
+    # Check each document individually — avoids surname-as-second-person hallucination
+    names_found = []
     for f in files:
         b64, mt = _render_first_page(f)
-        if b64:
-            content.append({
-                "type": "image",
-                "source": {"type": "base64", "media_type": mt, "data": b64}
-            })
-            rendered += 1
+        if not b64:
+            continue
+        q.put(f"  {f.name}")
+        try:
+            resp = ai.messages.create(
+                model=VISION_MODEL,
+                max_tokens=80,
+                messages=[{"role": "user", "content": [
+                    {"type": "image", "source": {"type": "base64", "media_type": mt, "data": b64}},
+                    {"type": "text", "text": PER_DOC_ID_PROMPT},
+                ]}],
+            )
+            result = resp.content[0].text.strip().strip('"\'').strip()
+            if result.lower() not in ("skip", "not_an_id", ""):
+                names_found.append(result)
+                q.put(f"  → {result}")
+        except Exception as e:
+            q.put(f"  [error] {e}")
 
-    if not rendered:
-        q.put("Could not render any documents.")
+    unique_names = _deduplicate_names(names_found)
+
+    if not unique_names:
+        q.put("No identity documents recognised — please type the name manually.")
         with get_db() as db:
             db.execute(
-                "UPDATE pending_clients SET status='error' WHERE folder_name=?", (folder_name,)
+                "UPDATE pending_clients SET status='conflict', detected_name='', "
+                "conflict_with='', updated_at=datetime('now') WHERE folder_name=?",
+                (folder_name,)
             )
         return
 
-    content.append({"type": "text", "text": IDENTIFY_PROMPT})
-
-    q.put(f"Asking AI ({rendered} page(s) sent)...")
-    resp = ai.messages.create(
-        model=VISION_MODEL,
-        max_tokens=60,
-        messages=[{"role": "user", "content": content}],
-    )
-    detected_name = resp.content[0].text.strip().strip('"\'').strip()
-    q.put(f"Detected name: {detected_name}")
+    detected_name = " e ".join(unique_names[:2])  # max 2 people
+    q.put(f"Detected: {detected_name}")
 
     conflict = _conflict_check(detected_name)
     if conflict:

@@ -30,12 +30,22 @@
   </div>
 </div>
 
-<!-- Pending new clients (polls every 5s) -->
+<!-- Pending new clients (polls every 5s, pauses when user is typing in a conflict form) -->
 <div id="pending-section"
      hx-get="/clients/pending-partial"
      hx-trigger="load, every 5s"
      hx-swap="innerHTML">
 </div>
+<script>
+  document.body.addEventListener('htmx:beforeRequest', function(evt) {
+    if (evt.detail.target && evt.detail.target.id === 'pending-section') {
+      var conflict = document.querySelector('#pending-section input[name="confirmed_name"]');
+      if (conflict && document.activeElement === conflict) {
+        evt.preventDefault();
+      }
+    }
+  });
+</script>
 
 <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
   {% for card in cards %}
