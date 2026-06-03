@@ -1163,12 +1163,15 @@ def cleanup_empty_folders(client_folder: Path) -> List[str]:
         key=lambda p: len(p.parts),
         reverse=True,
     )
+    skip_lower = {e.lower() for e in SKIP_EXTENSIONS}
     for d in dirs_deepest_first:
         if d.name.lower() in standard_lower:
             continue  # never remove standard folders
-        if not any(d.rglob("*")):  # truly empty (no files, no subdirs)
+        files = [f for f in d.rglob("*") if f.is_file()]
+        # Treat as empty if no files, or only skip-extension stubs (.action, .json, etc.)
+        if not files or all(f.suffix.lower() in skip_lower for f in files):
             try:
-                d.rmdir()
+                shutil.rmtree(str(d))
                 removed.append(str(d))
             except OSError:
                 pass
