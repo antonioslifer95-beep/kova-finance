@@ -12,10 +12,12 @@ IMAGE_EXTS    = {".jpg", ".jpeg", ".png"}
 DOC_EXTS      = {".pdf"} | IMAGE_EXTS
 
 PER_DOC_ID_PROMPT = (
-    "Is this an identity document (CC cartão cidadão, passport, BI, "
-    "autorização de residência / título de residência)?\n"
-    "If YES: reply with ONLY the full name of the person exactly as written on the document.\n"
-    "If NO: reply with exactly: skip"
+    "Look at this document.\n"
+    "If it is an identity document (CC cartão cidadão, passport, BI, título de residência, "
+    "autorização de residência): write the complete full name on the document in Title Case "
+    "(given names + all surnames, e.g. 'Tiago José Martins Sanches'). Write the name only — "
+    "no other words.\n"
+    "If it is NOT an identity document: write only the word skip."
 )
 
 
@@ -96,7 +98,9 @@ def _conflict_check(detected_name: str) -> Optional[str]:
         ).fetchall()
     for row in rows:
         existing_norm = _norm(row["folder_name"])
-        if any(token in existing_norm for token in tokens):
+        matches = sum(1 for t in tokens if t in existing_norm)
+        # Require 2+ matching tokens to avoid false positives on common first names
+        if matches >= 2:
             return row["folder_name"]
     return None
 
@@ -155,6 +159,49 @@ def start_identification(folder_name: str) -> int:
 
     threading.Thread(target=_worker, daemon=True).start()
     return run_id
+
+
+def _parse_name_response(raw: str) -> Optional[str]:
+    """
+    Extract a clean name from the AI response, stripping common preambles,
+    markdown bold markers, and verbose explanations.
+    """
+    import re as _re
+    text = raw.strip()
+    # Strip markdown bold/italic
+    text = _re.sub(r'\*+', '', text)
+    # If model wrote "YES\n..." or "Yes, ...\n..." take everything after the first newline
+    if '\n' in text:
+        lines = [l.strip() for l in text.splitlines() if l.strip()]
+        # Skip lines that are clearly preamble ("yes", "yes, this is...", etc.)
+        for line in lines:
+            low = line.lower()
+            if low in ('yes', 'no', 'skip'):
+                continue
+            if low.startswith('yes,') or low.startswith('yes:'):
+                continue
+            if low.startswith('the complete') or low.startswith('the full'):
+                continue
+            # Take first line that looks like a name (has letters, reasonable length)
+            if _re.search(r'[A-Za-zÀ-ÿ]{3,}', line) and len(line) < 100:
+                text = line
+                break
+        else:
+            return None
+    # Now clean the single line
+    text = text.strip().strip('"\'').strip()
+    # Remove trailing punctuation
+    text = text.rstrip('.')
+    # Skip if it's still a preamble word
+    if text.lower() in ('yes', 'no', 'skip', 'not_an_id', ''):
+        return None
+    # Skip if too long (likely a sentence, not a name)
+    if len(text) > 80:
+        return None
+    # Title-case if all-caps
+    if text == text.upper():
+        text = text.title()
+    return text or None
 
 
 def _deduplicate_names(names: list) -> list:
@@ -233,8 +280,10 @@ def _run_identification(folder_name: str, q: queue.Queue):
             )
             result = resp.content[0].text.strip().strip('"\'').strip()
             if result.lower() not in ("skip", "not_an_id", ""):
-                names_found.append(result)
-                q.put(f"  → {result}")
+                clean = _parse_name_response(result)
+                if clean:
+                    names_found.append(clean)
+                    q.put(f"  → {clean}")
         except Exception as e:
             q.put(f"  [error] {e}")
 
