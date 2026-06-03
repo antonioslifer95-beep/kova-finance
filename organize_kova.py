@@ -744,12 +744,12 @@ def identify_person_by_vision(
     else:
         return None
 
-    names_str = " / ".join(person_names)
+    names_list = ", ".join(person_names)
     prompt = (
-        f"This document is from a joint mortgage dossier for: {names_str}.\n"
-        f"Which SINGLE person does this document belong to?\n"
-        f"Reply with ONLY one of these exact names: {names_str}\n"
-        f"If it clearly belongs to both or neither, reply: shared"
+        f"Mortgage dossier with two applicants: {names_list}.\n"
+        f"Look at whose name appears on this document as account holder, taxpayer, or subject.\n"
+        f"Write one word only — exactly one of: {names_list}, shared.\n"
+        f"No other words."
     )
     try:
         resp = ai_client.messages.create(
@@ -764,10 +764,11 @@ def identify_person_by_vision(
             }],
         )
         result = resp.content[0].text.strip()
+        # Verbose response: scan for a person name anywhere in the text
         if "shared" in result.lower():
             return None
         for name in person_names:
-            if name.lower() in result.lower() or result.lower() in name.lower():
+            if name.lower() in result.lower():
                 return name
     except Exception as e:
         print(f"    Person-vision error ({path.name}): {e}")
