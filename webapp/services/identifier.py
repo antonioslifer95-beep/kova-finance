@@ -11,17 +11,59 @@ VISION_MODEL  = "claude-sonnet-4-6"   # Sonnet for identification — one-time p
 IMAGE_EXTS    = {".jpg", ".jpeg", ".png"}
 DOC_EXTS      = {".pdf"} | IMAGE_EXTS
 
-PER_DOC_ID_PROMPT = (
-    "Look at this document.\n"
-    "If it is a Portuguese identity document (CC cartão cidadão, BI, passport, "
-    "título de residência, autorização de residência):\n"
-    "  Find the field labeled 'Nome Próprio' (given names) and 'Apelidos' (surnames).\n"
-    "  Write the person's name as: [Nome Próprio] [Apelidos] in Title Case.\n"
-    "  Example: 'Luís Miguel Campos Miranda'\n"
-    "  IMPORTANT: Do NOT include parent names from the 'Filiação' field.\n"
-    "  Write the name only — no other words.\n"
-    "If it is NOT an identity document: write only the word skip."
-)
+# Personal categories where files get a person suffix — shared ones (Imóvel, Proposta) don't
+_PERSONAL_CATS = {"Documentos Pessoais", "Rendimentos", "Extratos Bancários", "IRS", "Mapa CRC", "RGPD"}
+
+# Known bank/institution tokens that appear in filenames but are NOT person names
+_KNOWN_NON_PERSON = {
+    "BCP", "BPI", "CGD", "Santander", "NovoBanco", "Revolut", "Wise",
+    "ActivoBank", "Montepio", "Itau", "Millennium", "Bankinter",
+    "CA", "CRC", "BP", "AL", "SS",
+}
+
+CATEGORIZE_AND_NAME_PROMPT = """\
+This is a document from a Portuguese mortgage application dossier.
+Provide exactly two lines:
+Category: <one of: Documentos Pessoais, Rendimentos, Extratos Bancários, IRS, Imóvel, Mapa CRC, RGPD, Proposta Crédito>
+Filename: <standardized stem — use these conventions>
+
+Rendimentos:    payslip → RecVenc_YYYY-MM_FirstName  |  employer declaration → DeclPatronal_FirstName
+Extratos:       bank statement → Extrato_YYYY-MM_BankName_FirstName  (omit FirstName if joint/unclear)
+IRS:            tax return → IRS_YYYY_FirstName  |  liquidation note → NotaLiq_IRS_YYYY_FirstName
+Documentos:     CC/BI → CC_FirstName  |  passport → Passaporte_FirstName  |  residence permit → TituloResidencia_FirstName
+                address proof → CompMorada_FirstName  |  IBAN proof → CompIBAN_BankName_FirstName
+Mapa CRC:       → MapaCRC_YYYY-MM_FirstName
+RGPD:           → RGPD_FirstName  (or just RGPD if joint)
+Imóvel:         property cert → CertidaoPredial  |  energy cert → CertificadoEnergetico  |  deed → Escritura
+Proposta:       proposal → Proposta_BankName_YYYY-MM
+
+Rules:
+- FirstName = the person's first name ONLY as it appears in the document (e.g. Tiago, Dalila, Vera)
+- Use _ between parts, no spaces, YYYY-MM for dates
+- If the document clearly belongs to a specific person, include their FirstName as the LAST part
+- If shared/joint or person unclear, omit FirstName
+- Reply with ONLY the two lines above, nothing else
+"""
+
+
+def _person_from_stem(stem: str) -> Optional[str]:
+    """Extract person first name from a standardized filename stem.
+    Person name is always the last _ token, alphabetic only."""
+    parts = stem.split("_")
+    for part in reversed(parts):
+        if not part:
+            continue
+        if re.match(r'^\d{4}(-\d{2})?$', part):   # date
+            continue
+        if re.match(r'^v\d+$', part, re.IGNORECASE):  # version
+            continue
+        if part.upper() in {n.upper() for n in _KNOWN_NON_PERSON}:
+            continue
+        if len(part) < 3:
+            continue
+        if re.match(r'^[A-Za-zÀ-ÿ]+$', part):     # pure letters = name
+            return part.title()
+    return None
 
 
 # ── CRUD ────────────────────────────────────────────────────────────────────
@@ -279,9 +321,11 @@ def _run_identification(folder_name: str, q: queue.Queue):
             )
         return
 
-    q.put(f"Found {len(files)} document(s). Checking each for identity documents...")
+    q.put(f"Found {len(files)} document(s). Categorising and renaming each...")
 
-    # Check each document individually — avoids surname-as-second-person hallucination
+    # Rename-first approach: get a standardised filename with the person's first name
+    # embedded, then extract names from the filenames — much more reliable than
+    # trying to parse CC fields directly.
     names_found = []
     for f in files:
         b64, mt = _render_first_page(f)
@@ -291,25 +335,41 @@ def _run_identification(folder_name: str, q: queue.Queue):
         try:
             resp = ai.messages.create(
                 model=VISION_MODEL,
-                max_tokens=80,
+                max_tokens=60,
                 messages=[{"role": "user", "content": [
                     {"type": "image", "source": {"type": "base64", "media_type": mt, "data": b64}},
-                    {"type": "text", "text": PER_DOC_ID_PROMPT},
+                    {"type": "text", "text": CATEGORIZE_AND_NAME_PROMPT},
                 ]}],
             )
-            result = resp.content[0].text.strip().strip('"\'').strip()
-            if result.lower() not in ("skip", "not_an_id", ""):
-                clean = _parse_name_response(result)
-                if clean:
-                    names_found.append(clean)
-                    q.put(f"  → {clean}")
+            raw = resp.content[0].text.strip()
+            # Parse "Category: X\nFilename: Y"
+            category = stem = None
+            for line in raw.splitlines():
+                line = line.strip()
+                if line.lower().startswith("category:"):
+                    category = line.split(":", 1)[1].strip()
+                elif line.lower().startswith("filename:"):
+                    stem = line.split(":", 1)[1].strip().strip('"\'')
+            if not category or not stem:
+                q.put(f"  [skip] no structured response")
+                continue
+            # Only personal categories carry a person name
+            if category not in _PERSONAL_CATS:
+                q.put(f"  → {stem} ({category}, shared)")
+                continue
+            person = _person_from_stem(stem)
+            if person:
+                q.put(f"  → {stem}  →  {person}")
+                names_found.append(person)
+            else:
+                q.put(f"  → {stem} ({category}, no name)")
         except Exception as e:
             q.put(f"  [error] {e}")
 
     unique_names = _deduplicate_names(names_found)
 
     if not unique_names:
-        q.put("No identity documents recognised — please type the name manually.")
+        q.put("Could not determine names — please type the client name manually.")
         with get_db() as db:
             db.execute(
                 "UPDATE pending_clients SET status='conflict', detected_name='', "
@@ -318,7 +378,7 @@ def _run_identification(folder_name: str, q: queue.Queue):
             )
         return
 
-    detected_name = " e ".join(unique_names[:2])  # max 2 people
+    detected_name = " e ".join(unique_names[:2])
     q.put(f"Detected: {detected_name}")
 
     conflict = _conflict_check(detected_name)
