@@ -1267,6 +1267,26 @@ def apply_plan(plans: List[Dict]) -> None:
             print(f"  rename  {old_path.name}  ->  {new_path.name}")
             actions += 1
 
+        # Post-rename misrouting pass: after renames, some root standard-folder
+        # files may now contain a person's name and belong in a sub-client folder.
+        subclient_paths = _get_subclient_folders(Path(p["client_folder"]))
+        extra_parsed = _parse_person_names(p["client"])
+        all_sc = subclient_paths + [
+            Path(p["client_folder"]) / name
+            for name in extra_parsed
+            if name.lower() not in {sc.name.lower() for sc in subclient_paths}
+        ]
+        if all_sc:
+            for extra_move in find_misrouted_files(Path(p["client_folder"]), all_sc):
+                src = Path(extra_move["from"])
+                dst = Path(extra_move["to"])
+                if not src.exists() or dst.exists():
+                    continue
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(src), str(dst))
+                print(f"  re-route  {src.name}  ->  {dst.parent.parent.name}/{dst.parent.name}/")
+                actions += 1
+
         # Remove empty leftover folders (dissolved dirs, old processados, etc.)
         removed = cleanup_empty_folders(Path(p["client_folder"]))
         for r in removed:
@@ -1278,8 +1298,7 @@ def apply_plan(plans: List[Dict]) -> None:
             actions += 1
 
         # Remove empty root standard folders for two-person clients
-        subclient_paths = _get_subclient_folders(Path(p["client_folder"]))
-        removed_root = cleanup_empty_root_folders(Path(p["client_folder"]), subclient_paths)
+        removed_root = cleanup_empty_root_folders(Path(p["client_folder"]), all_sc)
         for r in removed_root:
             print(f"  rmdir (shared-root cleanup)  {Path(r).name}")
             actions += 1
