@@ -116,7 +116,13 @@ def _render_first_page(path: Path) -> tuple[Optional[str], Optional[str]]:
         try:
             import fitz
             doc = fitz.open(str(path))
-            pix = doc[0].get_pixmap(dpi=200)
+            page = doc[0]
+            rect = page.rect
+            # Scale so the longest dimension is at most 1500 px — handles both
+            # normal PDFs and high-res raster scans stored with huge page rects
+            max_px = 1500
+            scale = max_px / max(rect.width, rect.height)
+            pix = page.get_pixmap(matrix=fitz.Matrix(scale, scale))
             b64 = base64.standard_b64encode(pix.tobytes("jpeg")).decode()
             doc.close()
             return b64, "image/jpeg"
@@ -217,20 +223,21 @@ def _parse_name_response(raw: str) -> Optional[str]:
 
 
 def _deduplicate_names(names: list) -> list:
-    """Remove names that are subsets of another name (same person, partial vs full name)."""
+    """
+    Merge entries that refer to the same person (same first name, slightly different
+    representation). Two names are the same person iff their first tokens match —
+    do NOT merge on shared surnames alone (e.g. Pedro Pereira ≠ Vera Pereira).
+    """
     unique = []
     for name in names:
-        norm_name = _norm(name)
-        tokens = set(t for t in norm_name.split() if len(t) >= 4)
+        first = _norm(name).split()[0] if name.strip() else ""
         is_dup = False
-        for existing in unique:
-            norm_existing = _norm(existing)
-            tokens_existing = set(t for t in norm_existing.split() if len(t) >= 4)
-            if tokens & tokens_existing:
+        for i, existing in enumerate(unique):
+            existing_first = _norm(existing).split()[0] if existing.strip() else ""
+            if first and first == existing_first:
                 is_dup = True
-                # Keep the longer (more complete) name
-                if len(name) > len(existing):
-                    unique[unique.index(existing)] = name
+                if len(name) > len(existing):  # keep the fuller version
+                    unique[i] = name
                 break
         if not is_dup:
             unique.append(name)
