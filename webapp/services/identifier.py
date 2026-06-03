@@ -7,16 +7,19 @@ from config import BASE_DIR
 
 _runs: dict[int, queue.Queue] = {}
 
-VISION_MODEL  = "claude-haiku-4-5-20251001"
+VISION_MODEL  = "claude-sonnet-4-6"   # Sonnet for identification — one-time per client, needs accuracy
 IMAGE_EXTS    = {".jpg", ".jpeg", ".png"}
 DOC_EXTS      = {".pdf"} | IMAGE_EXTS
 
 PER_DOC_ID_PROMPT = (
     "Look at this document.\n"
-    "If it is an identity document (CC cartão cidadão, passport, BI, título de residência, "
-    "autorização de residência): write the complete full name on the document in Title Case "
-    "(given names + all surnames, e.g. 'Tiago José Martins Sanches'). Write the name only — "
-    "no other words.\n"
+    "If it is a Portuguese identity document (CC cartão cidadão, BI, passport, "
+    "título de residência, autorização de residência):\n"
+    "  Find the field labeled 'Nome Próprio' (given names) and 'Apelidos' (surnames).\n"
+    "  Write the person's name as: [Nome Próprio] [Apelidos] in Title Case.\n"
+    "  Example: 'Luís Miguel Campos Miranda'\n"
+    "  IMPORTANT: Do NOT include parent names from the 'Filiação' field.\n"
+    "  Write the name only — no other words.\n"
     "If it is NOT an identity document: write only the word skip."
 )
 
@@ -113,7 +116,7 @@ def _render_first_page(path: Path) -> tuple[Optional[str], Optional[str]]:
         try:
             import fitz
             doc = fitz.open(str(path))
-            pix = doc[0].get_pixmap(dpi=120)
+            pix = doc[0].get_pixmap(dpi=200)
             b64 = base64.standard_b64encode(pix.tobytes("jpeg")).decode()
             doc.close()
             return b64, "image/jpeg"
@@ -173,7 +176,7 @@ def _parse_name_response(raw: str) -> Optional[str]:
     # If model wrote "YES\n..." or "Yes, ...\n..." take everything after the first newline
     if '\n' in text:
         lines = [l.strip() for l in text.splitlines() if l.strip()]
-        # Skip lines that are clearly preamble ("yes", "yes, this is...", etc.)
+        # Skip lines that are clearly preamble or junk
         for line in lines:
             low = line.lower()
             if low in ('yes', 'no', 'skip'):
@@ -182,10 +185,19 @@ def _parse_name_response(raw: str) -> Optional[str]:
                 continue
             if low.startswith('the complete') or low.startswith('the full'):
                 continue
-            # Take first line that looks like a name (has letters, reasonable length)
-            if _re.search(r'[A-Za-zÀ-ÿ]{3,}', line) and len(line) < 100:
-                text = line
-                break
+            # Reject MRZ lines (contain < separator), explanatory labels (contain :),
+            # or lines starting with common English explanation words
+            if '<' in line or ':' in line:
+                continue
+            if _re.match(r'^(looking|from|based|the |this |i |note|however|unfortunately)', low):
+                continue
+            # Must look like a name: only letters, spaces, hyphens — no digits or special chars
+            if not _re.match(r"^[A-Za-zÀ-ÿ\s\-']+$", line):
+                continue
+            if len(line) < 3 or len(line) > 80:
+                continue
+            text = line
+            break
         else:
             return None
     # Now clean the single line
