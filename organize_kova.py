@@ -177,7 +177,7 @@ def _get_subclient_folders(client_folder: Path) -> List[Path]:
     ]
 
 # Top-level names to skip
-SKIP_NAMES = {".claude", ".git", "standby", "despesas valencia", "nova pasta", "webapp"}
+SKIP_NAMES = {".claude", ".git", "standby", "despesas valencia", "nova pasta", "_claude_review", "webapp", "__pycache__"}
 
 # File extensions to skip entirely
 SKIP_EXTENSIONS = {".action", ".json", ".xlsx", ".xls", ".docx", ".doc"}
@@ -1523,6 +1523,8 @@ def main() -> None:
             continue
         if item.name.lower() in skip_lower:
             continue
+        if item.name.startswith("_"):
+            continue  # _novo_* pending folders, __pycache__, _claude_review, etc.
         if args.client and item.name.lower() != args.client.lower():
             continue
         client_folders.append(item)
