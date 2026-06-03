@@ -863,6 +863,7 @@ def scan_client(
         "duplicates": [],
         "uncategorized": [],
         "renames": [],
+        "empty_root_folders": [],
     }
 
     # Collect standard folders to create — root level
@@ -957,6 +958,13 @@ def scan_client(
     if use_vision and ai_client:
         _plan_renames(plan, client_folder, all_subclients, ai_client)
 
+    # ── Empty root personal folders (two-person clients only) ────────────────
+    if all_subclients:
+        for std in STANDARD_FOLDERS:
+            folder = client_folder / std
+            if folder.exists() and not any(folder.rglob("*")):
+                plan["empty_root_folders"].append(str(folder))
+
     return plan
 
 
@@ -1025,12 +1033,13 @@ def _plan_renames(plan: Dict, client_folder: Path, all_subclients: List[Path], a
 # ─── Report ────────────────────────────────────────────────────────────────
 
 def print_plan(plans: List[Dict]) -> None:
-    total_moves   = sum(len(p["moves"])         for p in plans)
-    total_merges  = sum(len(p["merges"])        for p in plans)
-    total_dupes   = sum(len(p["duplicates"])    for p in plans)
-    total_uncat   = sum(len(p["uncategorized"]) for p in plans)
-    total_folders = sum(len(p["new_folders"])   for p in plans)
-    total_renames = sum(len(p.get("renames",[])) for p in plans)
+    total_moves   = sum(len(p["moves"])                   for p in plans)
+    total_merges  = sum(len(p["merges"])                  for p in plans)
+    total_dupes   = sum(len(p["duplicates"])              for p in plans)
+    total_uncat   = sum(len(p["uncategorized"])           for p in plans)
+    total_folders = sum(len(p["new_folders"])             for p in plans)
+    total_renames = sum(len(p.get("renames", []))         for p in plans)
+    total_empty   = sum(len(p.get("empty_root_folders", [])) for p in plans)
 
     sep = "=" * 70
     print(f"\n{sep}")
@@ -1043,12 +1052,14 @@ def print_plan(plans: List[Dict]) -> None:
     print(f"  Image -> PDF merge: {total_merges} group(s)")
     print(f"  True duplicates  : {total_dupes}")
     print(f"  Uncategorized    : {total_uncat}")
+    print(f"  Empty root fldrs : {total_empty}")
     print(sep)
 
     for p in plans:
         has_work = any([
             p["new_folders"], p["moves"], p["merges"],
-            p["duplicates"], p["uncategorized"], p.get("renames", [])
+            p["duplicates"], p["uncategorized"],
+            p.get("renames", []), p.get("empty_root_folders", [])
         ])
         if not has_work:
             continue
@@ -1103,12 +1114,38 @@ def print_plan(plans: List[Dict]) -> None:
                 print(f"   REN   {old}")
                 print(f"     ->  {r['new_name']}")
 
+        if p.get("empty_root_folders"):
+            names = [Path(f).name for f in p["empty_root_folders"]]
+            print(f"   RMDIR (empty shared-root): {', '.join(names)}")
+
     print(f"\n{sep}")
     print("  Run with --apply to execute.  Plan saved to organize_plan.json")
     print(f"{sep}\n")
 
 
 # ─── Cleanup ───────────────────────────────────────────────────────────────
+
+def cleanup_empty_root_folders(client_folder: Path, subclients: List[Path]) -> List[str]:
+    """
+    For two-person clients: remove empty root-level standard folders.
+    Only runs when sub-client folders exist. Folders with any files are left untouched —
+    shared docs (Imóvel, joint IRS, joint RGPD, etc.) survive naturally.
+    """
+    if not subclients:
+        return []
+    removed = []
+    for std in STANDARD_FOLDERS:
+        folder = client_folder / std
+        if not folder.exists():
+            continue
+        if not any(folder.rglob("*")):   # empty — no files anywhere inside
+            try:
+                folder.rmdir()
+                removed.append(str(folder))
+            except OSError:
+                pass
+    return removed
+
 
 def cleanup_empty_folders(client_folder: Path) -> List[str]:
     """
@@ -1238,6 +1275,13 @@ def apply_plan(plans: List[Dict]) -> None:
             except ValueError:
                 rel = Path(r)
             print(f"  rmdir  {rel}")
+            actions += 1
+
+        # Remove empty root standard folders for two-person clients
+        subclient_paths = _get_subclient_folders(Path(p["client_folder"]))
+        removed_root = cleanup_empty_root_folders(Path(p["client_folder"]), subclient_paths)
+        for r in removed_root:
+            print(f"  rmdir (shared-root cleanup)  {Path(r).name}")
             actions += 1
 
         if actions == 0:
