@@ -3,7 +3,7 @@
 {% block mob_dashboard %}active{% endblock %}
 
 {% block content %}
-<div x-data="{ preview: null, previewName: '' }">
+<div x-data="{ preview: null, previewName: '', previewMime: '' }">
 
   <!-- Header -->
   <div class="flex items-center gap-2 mb-4">
@@ -117,7 +117,7 @@
           </button>
           <div x-show="open" x-cloak class="border-t border-gray-800">
             {% for doc in docs %}
-            <button @click="preview='{{ doc.id }}'; previewName='{{ doc.filename|replace("'","\\'")|truncate(35) }}'"
+            <button @click="preview='{{ doc.id }}'; previewName='{{ doc.filename|replace("'","\\'")|truncate(35) }}'; previewMime='{{ doc.mime_type }}'"
                     class="w-full text-left px-3 py-2.5 text-xs text-gray-400 hover:bg-gray-800 hover:text-gray-200
                            transition-colors flex items-center gap-2 group"
                     :class="preview=='{{ doc.id }}' ? 'bg-gray-800 text-gray-200' : ''">
@@ -175,12 +175,18 @@
               </button>
             </div>
           </div>
-          <!-- Document viewer -->
+          <!-- Document viewer: iframe for PDFs, img for images -->
           <div class="flex-1 bg-gray-950 overflow-auto">
-            <object :data="'/documents/' + preview + '/preview'" type="application/pdf"
-                    class="w-full h-full min-h-[60vh]">
-              <img :src="'/documents/' + preview + '/preview'" class="max-w-full h-auto mx-auto"/>
-            </object>
+            <template x-if="previewMime === 'application/pdf'">
+              <iframe :src="'/documents/' + preview + '/preview'"
+                      class="w-full h-full min-h-[70vh] border-0"></iframe>
+            </template>
+            <template x-if="previewMime !== 'application/pdf'">
+              <div class="flex items-center justify-center min-h-[70vh] p-2">
+                <img :src="'/documents/' + preview + '/preview'"
+                     class="max-w-full max-h-full object-contain"/>
+              </div>
+            </template>
           </div>
         </div>
       </template>
