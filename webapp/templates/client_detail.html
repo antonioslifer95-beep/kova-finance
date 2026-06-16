@@ -180,15 +180,45 @@
             </button>
           </div>
         </div>
-        <!-- Viewer: blob URL fed into iframe or img -->
+        <!-- Viewer -->
         <div class="flex-1 relative min-h-0 bg-gray-950">
-          <iframe x-show="previewMime === 'application/pdf'"
-                  :src="blobUrl"
-                  style="position:absolute;top:0;left:0;width:100%;height:100%;border:0;"></iframe>
-          <div x-show="previewMime !== 'application/pdf'"
-               style="position:absolute;top:0;left:0;width:100%;height:100%;overflow:auto;display:flex;align-items:center;justify-content:center;padding:12px;">
-            <img :src="blobUrl" style="max-width:100%;max-height:100%;object-fit:contain;"/>
-          </div>
+
+          <!-- PDF -->
+          <template x-if="blobUrl && previewMime === 'application/pdf'">
+            <div style="position:absolute;top:0;left:0;width:100%;height:100%;display:flex;flex-direction:column;">
+              <iframe :src="blobUrl"
+                      style="flex:1;border:0;width:100%;background:#1a1a1a;"
+                      @load="console.log('iframe loaded')"
+                      @error="console.log('iframe error')">
+              </iframe>
+              <!-- Fallback open button in case iframe PDF doesn't render -->
+              <div class="flex-shrink-0 text-center py-2 bg-gray-900 border-t border-gray-800">
+                <a :href="blobUrl" target="_blank"
+                   class="text-xs text-indigo-400 hover:text-indigo-300 underline">
+                  Open PDF in browser
+                </a>
+              </div>
+            </div>
+          </template>
+
+          <!-- Image -->
+          <template x-if="blobUrl && previewMime !== 'application/pdf'">
+            <div style="position:absolute;top:0;left:0;width:100%;height:100%;overflow:auto;display:flex;align-items:center;justify-content:center;padding:12px;">
+              <img :src="blobUrl" style="max-width:100%;max-height:100%;object-fit:contain;"/>
+            </div>
+          </template>
+
+          <!-- Fetch error -->
+          <template x-if="!blobUrl && !loading && preview">
+            <div style="position:absolute;top:0;left:0;width:100%;height:100%;display:flex;align-items:center;justify-content:center;">
+              <div class="text-center text-gray-500 px-6">
+                <p class="text-sm mb-3">Could not load document preview.</p>
+                <a :href="'/documents/' + preview + '/download?token={{ token }}'"
+                   class="text-xs text-indigo-400 underline">Download instead</a>
+              </div>
+            </div>
+          </template>
+
         </div>
       </div>
 
