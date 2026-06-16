@@ -101,8 +101,10 @@ def extract_person_data(client_id: int, subclient_key: str) -> dict:
         f'- "age": integer age (calculate from birth date if needed; today is {today})\n'
         f'- "nif": 9-digit NIF\n'
         f'- "monthly_income": average monthly gross income in euros as a number\n'
-        f'- "crc_total": sum of all monthly installment payments (prestação mensal / encargo mensal) '
-        f'in euros as a number — this is the monthly payment amount, NOT the total outstanding capital or total debt balance\n\n'
+        f'- "crc_total": from the Mapa CRC document, sum the "Abatido ao ativo" values across all credit '
+        f'products — this is the monthly installment (prestação). '
+        f'Do NOT use "Total em dívida" (outstanding capital) or "Montante Potencial". '
+        f'If "Abatido ao ativo" is 0,00 for a product, do not count it. Return the total as a number.\n\n'
         f"Documents:\n{context}"
     )
     try:
