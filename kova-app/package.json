@@ -1,0 +1,17 @@
+{
+  "name": "kova-finance-app",
+  "version": "1.0.0",
+  "description": "Kova Finance Android App",
+  "main": "index.js",
+  "scripts": {
+    "build": "echo No build step needed",
+    "sync": "cap sync"
+  },
+  "dependencies": {
+    "@capacitor/android": "^6.0.0",
+    "@capacitor/core": "^6.0.0"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^6.0.0"
+  }
+}

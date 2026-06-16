@@ -52,3 +52,8 @@ __pycache__/
 
 # Claude Code
 .claude/
+
+# Capacitor / Android app build artifacts
+kova-app/node_modules/
+kova-app/android/
+kova-app/ios/

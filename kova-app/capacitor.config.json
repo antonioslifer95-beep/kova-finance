@@ -1,0 +1,14 @@
+{
+  "appId": "com.kovafinance.app",
+  "appName": "Kova Finance",
+  "webDir": "www",
+  "server": {
+    "allowNavigation": ["*"],
+    "cleartext": true
+  },
+  "android": {
+    "allowMixedContent": true,
+    "captureInput": true,
+    "webContentsDebuggingEnabled": false
+  }
+}
