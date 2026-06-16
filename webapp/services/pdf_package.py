@@ -89,10 +89,13 @@ def extract_person_data(client_id: int, subclient_key: str) -> dict:
     if not rows:
         return {}
 
-    context = "\n\n".join(
-        f"[{r['category']} / {r['filename']}]\n{r['body'][:800]}"
-        for r in rows[:12]
-    )
+    context_parts = []
+    for r in rows[:12]:
+        # Mapa CRC needs full text — it lists multiple credit entries that would be cut off at 800 chars
+        limit = 6000 if r["category"] == "Mapa CRC" else 800
+        body  = (r["body"] or "")[:limit]
+        context_parts.append(f"[{r['category']} / {r['filename']}]\n{body}")
+    context = "\n\n".join(context_parts)
     today = date.today().isoformat()
     prompt = (
         f"From these Portuguese mortgage application documents extract the following. "
