@@ -297,43 +297,56 @@ function docViewer(token) {
     async shareFile() {
       if (!this.shareBlob) return;
       const filename = this.previewName || 'document';
+      const Cap = window.Capacitor;
 
-      // Capacitor native share (Android app) — writes file to temp storage then shares
-      if (window.Capacitor && window.Capacitor.Plugins.Share && window.Capacitor.Plugins.Filesystem) {
+      // Native Android app path
+      if (Cap && Cap.isNativePlatform && Cap.isNativePlatform()) {
         try {
-          const { Filesystem, Share } = window.Capacitor.Plugins;
-          const reader = new FileReader();
+          const { Filesystem, Share } = Cap.Plugins;
+
+          // Convert blob to base64
           const b64 = await new Promise((res, rej) => {
-            reader.onload = () => res(reader.result.split(',')[1]);
-            reader.onerror = rej;
-            reader.readAsDataURL(this.shareBlob);
+            const r = new FileReader();
+            r.onload  = () => res(r.result.split(',')[1]);
+            r.onerror = rej;
+            r.readAsDataURL(this.shareBlob);
           });
+
+          // Write to app cache
           const saved = await Filesystem.writeFile({
             path: filename,
             data: b64,
             directory: 'CACHE',
           });
+
+          // Open native share sheet with the local file
           await Share.share({
             title: filename,
-            url: saved.uri,
-            dialogTitle: 'Share document',
+            files: [saved.uri],
+            dialogTitle: 'Partilhar documento',
           });
-          await Filesystem.deleteFile({path: filename, directory: 'CACHE'}).catch(() => {});
+
+          Filesystem.deleteFile({ path: filename, directory: 'CACHE' }).catch(() => {});
           return;
         } catch(e) {
-          console.error('Capacitor share failed:', e);
+          console.error('Native share error:', e);
         }
       }
 
-      // Web fallback: navigator.share or download
-      if (navigator.canShare && navigator.canShare({files: [new File([this.shareBlob], filename, {type: this.previewMime})]})) {
-        await navigator.share({files: [new File([this.shareBlob], filename, {type: this.previewMime})], title: filename});
-      } else {
-        const url = URL.createObjectURL(this.shareBlob);
-        const a = document.createElement('a');
-        a.href = url; a.download = filename; a.click();
-        setTimeout(() => URL.revokeObjectURL(url), 1000);
-      }
+      // Desktop / browser fallback
+      try {
+        const file = new File([this.shareBlob], filename, { type: this.previewMime });
+        if (navigator.canShare && navigator.canShare({ files: [file] })) {
+          await navigator.share({ files: [file], title: filename });
+          return;
+        }
+      } catch(e) { /* not supported */ }
+
+      // Last resort: download
+      const url = URL.createObjectURL(this.shareBlob);
+      const a = document.createElement('a');
+      a.href = url; a.download = filename; a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
     },
 
     close() {
