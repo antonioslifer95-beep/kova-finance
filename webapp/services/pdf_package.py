@@ -101,7 +101,9 @@ def extract_person_data(client_id: int, subclient_key: str) -> dict:
         f"From these Portuguese mortgage application documents extract the following. "
         f"Return ONLY a valid JSON object with these keys (null if not found):\n"
         f'- "name": full legal name\n'
-        f'- "age": integer age (calculate from birth date if needed; today is {today})\n'
+        f'- "age": integer age — ALWAYS calculate from the birth date found in the document '
+        f'(e.g. from the CC/Cartão de Cidadão or passport). Do NOT use any age printed on the '
+        f'document as it may be outdated. Today is {today}.\n'
         f'- "nif": 9-digit NIF\n'
         f'- "monthly_income": average monthly gross income in euros as a number\n'
         f'- "crc_total": from the Mapa CRC, sum ALL "Abatido ao ativo" values that are greater than 0 '
