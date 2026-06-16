@@ -50,6 +50,43 @@ def _ocr_image(abs_path: str, api_key: str) -> str:
         return ""
 
 
+def _ocr_pdf(abs_path: str, page_count: int, api_key: str) -> str:
+    """
+    OCR an image-based PDF by rendering each page as JPEG and sending to Claude Vision.
+    Caps at 4 pages to control cost. Returns concatenated text.
+    """
+    import fitz, base64, anthropic
+    try:
+        doc = fitz.open(abs_path)
+        content = []
+        for i, page in enumerate(doc):
+            if i >= 4:
+                break
+            pix      = page.get_pixmap(matrix=fitz.Matrix(2, 2))
+            img_bytes = pix.tobytes("jpeg")
+            if len(img_bytes) > 5 * 1024 * 1024:
+                continue
+            b64 = base64.standard_b64encode(img_bytes).decode()
+            content.append({"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": b64}})
+        doc.close()
+        if not content:
+            return ""
+        content.append({"type": "text", "text": (
+            "Extract all text from these document page image(s). "
+            "Return only the raw text, preserving layout. "
+            "Include all numbers, dates, names, and labels."
+        )})
+        ai  = anthropic.Anthropic(api_key=api_key)
+        msg = ai.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=2000,
+            messages=[{"role": "user", "content": content}]
+        )
+        return msg.content[0].text.strip()
+    except Exception:
+        return ""
+
+
 def extract_text(abs_path: str) -> tuple[str, int]:
     """Returns (text, page_count). Never raises."""
     path = Path(abs_path)
@@ -60,7 +97,14 @@ def extract_text(abs_path: str) -> tuple[str, int]:
             pages = len(doc)
             text  = "\n".join(page.get_text() for page in doc)
             doc.close()
-            return text.strip(), pages
+            if text.strip():
+                return text.strip(), pages
+            # Image-based PDF — try Vision OCR
+            from database import setting
+            api_key = setting("anthropic_api_key")
+            if api_key:
+                return _ocr_pdf(abs_path, pages, api_key), pages
+            return "", pages
         elif ext in {".jpg", ".jpeg", ".png"}:
             from database import setting
             api_key = setting("anthropic_api_key")
@@ -110,19 +154,21 @@ def reindex_all():
     return len(futures)
 
 def reindex_images(client_id: int = None):
-    """Re-index image documents. Pass client_id to limit to one client."""
+    """Re-index images and image-based PDFs (scanned docs with no extractable text)."""
     with get_db() as db:
+        base = """
+            SELECT d.id, d.abs_path, d.client_id, d.category, d.filename
+            FROM documents d
+            LEFT JOIN documents_fts fts ON fts.doc_id = d.id
+            WHERE (
+                d.mime_type IN ('image/jpeg', 'image/png')
+                OR (d.mime_type = 'application/pdf' AND (fts.body IS NULL OR fts.body = ''))
+            )
+        """
         if client_id:
-            rows = db.execute(
-                "SELECT id, abs_path, client_id, category, filename FROM documents "
-                "WHERE mime_type IN ('image/jpeg', 'image/png') AND client_id=?",
-                (client_id,)
-            ).fetchall()
+            rows = db.execute(base + " AND d.client_id=?", (client_id,)).fetchall()
         else:
-            rows = db.execute(
-                "SELECT id, abs_path, client_id, category, filename FROM documents "
-                "WHERE mime_type IN ('image/jpeg', 'image/png')"
-            ).fetchall()
+            rows = db.execute(base).fetchall()
     futures = [
         _EXECUTOR.submit(index_document, r["id"], r["abs_path"], r["client_id"], r["category"], r["filename"])
         for r in rows
