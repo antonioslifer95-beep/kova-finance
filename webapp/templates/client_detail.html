@@ -181,25 +181,13 @@
           </div>
         </div>
         <!-- Viewer -->
-        <div class="flex-1 relative min-h-0 bg-gray-950">
+        <div class="flex-1 relative min-h-0 bg-gray-950" id="viewer-shell">
 
-          <!-- PDF -->
-          <template x-if="blobUrl && previewMime === 'application/pdf'">
-            <div style="position:absolute;top:0;left:0;width:100%;height:100%;display:flex;flex-direction:column;">
-              <iframe :src="blobUrl"
-                      style="flex:1;border:0;width:100%;background:#1a1a1a;"
-                      @load="console.log('iframe loaded')"
-                      @error="console.log('iframe error')">
-              </iframe>
-              <!-- Fallback open button in case iframe PDF doesn't render -->
-              <div class="flex-shrink-0 text-center py-2 bg-gray-900 border-t border-gray-800">
-                <a :href="blobUrl" target="_blank"
-                   class="text-xs text-indigo-400 hover:text-indigo-300 underline">
-                  Open PDF in browser
-                </a>
-              </div>
-            </div>
-          </template>
+          <!-- PDF: rendered page-by-page via PDF.js into canvases -->
+          <div x-show="previewMime === 'application/pdf' && !loading"
+               id="pdf-canvas-container"
+               style="position:absolute;top:0;left:0;width:100%;height:100%;overflow-y:auto;background:#525659;padding:8px;box-sizing:border-box;">
+          </div>
 
           <!-- Image -->
           <template x-if="blobUrl && previewMime !== 'application/pdf'">
@@ -209,7 +197,7 @@
           </template>
 
           <!-- Fetch error -->
-          <template x-if="!blobUrl && !loading && preview">
+          <template x-if="fetchError && !loading">
             <div style="position:absolute;top:0;left:0;width:100%;height:100%;display:flex;align-items:center;justify-content:center;">
               <div class="text-center text-gray-500 px-6">
                 <p class="text-sm mb-3">Could not load document preview.</p>
@@ -227,6 +215,7 @@
   </div>
 </div>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script>
 function docViewer(token) {
   return {
@@ -235,30 +224,71 @@ function docViewer(token) {
     previewMime: '',
     blobUrl: null,
     loading: false,
+    fetchError: false,
 
-    init() {},
+    init() {
+      if (typeof pdfjsLib !== 'undefined') {
+        pdfjsLib.GlobalWorkerOptions.workerSrc =
+          'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+      }
+    },
 
     async openDoc(docId, name, mime) {
       if (this.blobUrl) { URL.revokeObjectURL(this.blobUrl); this.blobUrl = null; }
-      this.preview = docId;
+      this.preview   = docId;
       this.previewName = name;
       this.previewMime = mime || 'application/pdf';
-      this.loading = true;
+      this.loading   = true;
+      this.fetchError = false;
+
       try {
         const resp = await fetch('/documents/' + docId + '/preview?token=' + token);
         if (!resp.ok) throw new Error('HTTP ' + resp.status);
-        const blob = await resp.blob();
-        this.blobUrl = URL.createObjectURL(blob);
+
+        if (this.previewMime === 'application/pdf') {
+          const arrayBuffer = await resp.arrayBuffer();
+          this.loading = false;
+          await this._renderPdf(arrayBuffer);
+        } else {
+          const blob = await resp.blob();
+          this.blobUrl = URL.createObjectURL(blob);
+          this.loading = false;
+        }
       } catch(e) {
         console.error('Preview failed:', e);
-        this.blobUrl = null;
-      } finally {
+        this.fetchError = true;
         this.loading = false;
+      }
+    },
+
+    async _renderPdf(arrayBuffer) {
+      const container = document.getElementById('pdf-canvas-container');
+      if (!container) return;
+      container.innerHTML = '';
+
+      const pdf = await pdfjsLib.getDocument({data: arrayBuffer}).promise;
+      const containerWidth = container.clientWidth || window.innerWidth - 16;
+
+      for (let i = 1; i <= pdf.numPages; i++) {
+        const page     = await pdf.getPage(i);
+        const base     = page.getViewport({scale: 1});
+        const scale    = containerWidth / base.width;
+        const viewport = page.getViewport({scale});
+
+        const canvas   = document.createElement('canvas');
+        canvas.width   = viewport.width;
+        canvas.height  = viewport.height;
+        canvas.style.cssText = 'display:block;width:100%;margin-bottom:6px;background:#fff;border-radius:2px;';
+        container.appendChild(canvas);
+
+        await page.render({canvasContext: canvas.getContext('2d'), viewport}).promise;
       }
     },
 
     close() {
       if (this.blobUrl) { URL.revokeObjectURL(this.blobUrl); this.blobUrl = null; }
+      const container = document.getElementById('pdf-canvas-container');
+      if (container) container.innerHTML = '';
       this.preview = null;
     }
   };
