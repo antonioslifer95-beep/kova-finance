@@ -294,10 +294,46 @@ function docViewer(token) {
       }
     },
 
-    shareFile() {
-      // Open in system browser (Chrome on Android) — handles download + share natively
-      const url = window.location.origin + '/documents/' + this.preview + '/download?token={{ token }}';
-      window.open(url, '_system');
+    async shareFile() {
+      if (!this.shareBlob) return;
+      const filename = this.previewName || 'document';
+
+      // Capacitor native share (Android app) — writes file to temp storage then shares
+      if (window.Capacitor && window.Capacitor.Plugins.Share && window.Capacitor.Plugins.Filesystem) {
+        try {
+          const { Filesystem, Share } = window.Capacitor.Plugins;
+          const reader = new FileReader();
+          const b64 = await new Promise((res, rej) => {
+            reader.onload = () => res(reader.result.split(',')[1]);
+            reader.onerror = rej;
+            reader.readAsDataURL(this.shareBlob);
+          });
+          const saved = await Filesystem.writeFile({
+            path: filename,
+            data: b64,
+            directory: 'CACHE',
+          });
+          await Share.share({
+            title: filename,
+            url: saved.uri,
+            dialogTitle: 'Share document',
+          });
+          await Filesystem.deleteFile({path: filename, directory: 'CACHE'}).catch(() => {});
+          return;
+        } catch(e) {
+          console.error('Capacitor share failed:', e);
+        }
+      }
+
+      // Web fallback: navigator.share or download
+      if (navigator.canShare && navigator.canShare({files: [new File([this.shareBlob], filename, {type: this.previewMime})]})) {
+        await navigator.share({files: [new File([this.shareBlob], filename, {type: this.previewMime})], title: filename});
+      } else {
+        const url = URL.createObjectURL(this.shareBlob);
+        const a = document.createElement('a');
+        a.href = url; a.download = filename; a.click();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+      }
     },
 
     close() {
