@@ -36,6 +36,12 @@ def get_persons(client_id: int) -> list:
             buckets[sc] = []
         buckets[sc].append(dict(r))
 
+    # If there are named subclients, root-level docs (subclient="") are shared
+    # documents (RGPD, Imóvel, etc.) — don't treat them as a separate person.
+    has_named = any(sc != "" for sc in buckets)
+    if has_named and "" in buckets:
+        del buckets[""]
+
     persons = []
     for sc, docs in sorted(buckets.items(), key=lambda kv: (kv[0].lower() == "fiador", kv[0])):
         persons.append({
@@ -95,7 +101,8 @@ def extract_person_data(client_id: int, subclient_key: str) -> dict:
         f'- "age": integer age (calculate from birth date if needed; today is {today})\n'
         f'- "nif": 9-digit NIF\n'
         f'- "monthly_income": average monthly gross income in euros as a number\n'
-        f'- "crc_total": total monthly credit responsibilities in euros as a number\n\n'
+        f'- "crc_total": sum of all monthly installment payments (prestação mensal / encargo mensal) '
+        f'in euros as a number — this is the monthly payment amount, NOT the total outstanding capital or total debt balance\n\n'
         f"Documents:\n{context}"
     )
     try:
@@ -269,23 +276,23 @@ def generate_summary_pdf(persons_data: list, operation: dict, output_path: str, 
 
     def _applicant_fields(p):
         return [
-            ("Nome",                      p.get("name")),
-            ("Idade",                     _fmt_age(p.get("age"))),
-            ("NIF",                       _fmt_nif(p.get("nif"))),
-            ("Telefone",                  p.get("phone") or "—"),
-            ("Email",                     p.get("email") or "—"),
-            ("Rendimento Mensal Médio",   _fmt_eur(p.get("monthly_income"))),
-            ("Responsabilidades Crédito", _fmt_eur(p.get("crc_total"))),
+            ("Nome",                           p.get("name")),
+            ("Idade",                          _fmt_age(p.get("age"))),
+            ("NIF",                            _fmt_nif(p.get("nif"))),
+            ("Telefone",                       p.get("phone") or "—"),
+            ("Email",                          p.get("email") or "—"),
+            ("Rendimento Mensal Médio",        _fmt_eur(p.get("monthly_income"))),
+            ("Responsabilidades de Crédito",   _fmt_eur(p.get("crc_total"))),
         ]
 
     def _fiador_fields(p):
         return [
-            ("Nome",                      p.get("name")),
-            ("NIF",                       _fmt_nif(p.get("nif"))),
-            ("Telefone",                  p.get("phone") or "—"),
-            ("Email",                     p.get("email") or "—"),
-            ("Rendimento Mensal Médio",   _fmt_eur(p.get("monthly_income"))),
-            ("Responsabilidades Crédito", _fmt_eur(p.get("crc_total"))),
+            ("Nome",                           p.get("name")),
+            ("NIF",                            _fmt_nif(p.get("nif"))),
+            ("Telefone",                       p.get("phone") or "—"),
+            ("Email",                          p.get("email") or "—"),
+            ("Rendimento Mensal Médio",        _fmt_eur(p.get("monthly_income"))),
+            ("Responsabilidades de Crédito",   _fmt_eur(p.get("crc_total"))),
         ]
 
     if applicants:
