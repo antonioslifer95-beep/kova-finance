@@ -177,7 +177,7 @@ def _get_subclient_folders(client_folder: Path) -> List[Path]:
     ]
 
 # Top-level names to skip
-SKIP_NAMES = {".claude", ".git", "standby", "despesas valencia", "nova pasta", "_claude_review", "webapp", "__pycache__"}
+SKIP_NAMES = {".claude", ".git", "standby", "despesas valencia", "nova pasta", "_claude_review", "webapp", "__pycache__", "kova-app"}
 
 # File extensions to skip entirely
 SKIP_EXTENSIONS = {".action", ".json", ".xlsx", ".xls", ".docx", ".doc"}

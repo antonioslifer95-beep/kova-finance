@@ -11,6 +11,13 @@ MIME = {
 
 def sync_all():
     with get_db() as db:
+        # Remove any clients that are now in SKIP_NAMES (e.g. kova-app added later)
+        rows = db.execute("SELECT id, folder_name FROM clients WHERE is_standby=0").fetchall()
+        for row in rows:
+            if row["folder_name"].lower() in SKIP_NAMES:
+                db.execute("DELETE FROM documents_fts WHERE client_id=?", (row["id"],))
+                db.execute("DELETE FROM clients WHERE id=?", (row["id"],))
+
         for item in sorted(BASE_DIR.iterdir(), key=lambda p: p.name.lower()):
             if not item.is_dir():
                 continue
