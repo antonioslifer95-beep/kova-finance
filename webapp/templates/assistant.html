@@ -67,16 +67,25 @@ const _HISTORY = {{ history | tojson }};
 
     <template x-for="msg in messages" :key="msg.id">
       <div class="flex" :class="msg.role === 'user' ? 'justify-end' : ''">
-        <div class="max-w-[72%] rounded-xl px-4 py-2.5 text-sm leading-relaxed"
-             :class="msg.role === 'user'
-               ? 'bg-indigo-600 text-white'
-               : 'bg-gray-800 text-gray-200'">
-          <div x-show="msg.role === 'user'" x-text="msg.content"></div>
-          <div x-show="msg.role === 'assistant'"
-               class="md-body"
-               x-html="renderMd(msg.content)"></div>
-          <span x-show="msg.streaming"
-                class="inline-block w-1.5 h-3.5 bg-indigo-400 ml-0.5 animate-pulse align-middle"></span>
+        <div class="max-w-[72%]">
+          <template x-if="msg.role === 'assistant' && msg.detectedClient">
+            <div class="mb-1 flex items-center gap-1">
+              <span class="text-xs text-indigo-400 bg-indigo-900/40 border border-indigo-700/40 rounded-full px-2 py-0.5">
+                Searched: <span x-text="msg.detectedClient"></span>
+              </span>
+            </div>
+          </template>
+          <div class="rounded-xl px-4 py-2.5 text-sm leading-relaxed"
+               :class="msg.role === 'user'
+                 ? 'bg-indigo-600 text-white'
+                 : 'bg-gray-800 text-gray-200'">
+            <div x-show="msg.role === 'user'" x-text="msg.content"></div>
+            <div x-show="msg.role === 'assistant'"
+                 class="md-body"
+                 x-html="renderMd(msg.content)"></div>
+            <span x-show="msg.streaming"
+                  class="inline-block w-1.5 h-3.5 bg-indigo-400 ml-0.5 animate-pulse align-middle"></span>
+          </div>
         </div>
       </div>
     </template>
@@ -113,6 +122,7 @@ function chatApp() {
       role: m.role,
       content: m.content,
       streaming: false,
+      detectedClient: null,
     })),
 
     init() { this.scrollBottom(); },
@@ -149,7 +159,7 @@ function chatApp() {
       const uid = Date.now();
       this.messages.push({ id: uid, role: 'user', content: q, streaming: false });
       const aId = uid + 1;
-      this.messages.push({ id: aId, role: 'assistant', content: '', streaming: true });
+      this.messages.push({ id: aId, role: 'assistant', content: '', streaming: true, detectedClient: null });
       this.scrollBottom();
 
       const params = new URLSearchParams({ q });
@@ -171,6 +181,11 @@ function chatApp() {
           if (msg) msg.content += chunk;
           this.scrollBottom();
         };
+        es.addEventListener('client', (e) => {
+          const name = JSON.parse(e.data);
+          const msg = this.messages.find(m => m.id === aId);
+          if (msg) msg.detectedClient = name;
+        });
         es.onerror = () => { es.close(); this.loading = false; };
       } catch (e) {
         this.loading = false;

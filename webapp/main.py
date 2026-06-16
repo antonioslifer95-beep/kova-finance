@@ -17,6 +17,7 @@ from routers.documents_router import router as docs_r
 from routers.organizer_router import router as org_r
 from routers.ai_router import router as ai_r
 from routers.settings_router import router as settings_r
+from routers.package_router import router as package_r
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -62,3 +63,4 @@ app.include_router(docs_r)
 app.include_router(org_r)
 app.include_router(ai_r)
 app.include_router(settings_r)
+app.include_router(package_r)

@@ -54,6 +54,8 @@ def _sync_documents(db, client_folder: Path, client_id: int):
             continue
         if path.suffix.lower() not in DOC_EXTS:
             continue
+        if "Dossier e Folha de Rosto" in path.parts:
+            continue
         # Determine category and subclient from path depth
         category  = None
         subclient = None

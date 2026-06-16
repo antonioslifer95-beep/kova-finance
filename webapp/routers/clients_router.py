@@ -126,6 +126,14 @@ async def cancel_identification(request: Request):
     })
 
 
+@router.post("/clients/{client_id}/ocr-images")
+def ocr_client_images(request: Request, client_id: int):
+    current_user(request)
+    from services.indexer import reindex_images
+    n = reindex_images(client_id=client_id)
+    return RedirectResponse(f"/clients/{client_id}?msg=ocr&n={n}", status_code=302)
+
+
 @router.post("/clients/{client_id}/delete", response_class=HTMLResponse)
 async def delete_client(request: Request, client_id: int):
     current_user(request)
@@ -169,7 +177,7 @@ def dashboard(request: Request):
 
 
 @router.get("/clients/{client_id}", response_class=HTMLResponse)
-def client_detail(request: Request, client_id: int):
+def client_detail(request: Request, client_id: int, msg: str = "", n: int = 0):
     user = current_user(request)
     with get_db() as db:
         client = db.execute("SELECT * FROM clients WHERE id=?", (client_id,)).fetchone()
@@ -214,4 +222,5 @@ def client_detail(request: Request, client_id: int):
         "stats":   stats,
         "missing": missing,
         "std_folders": STANDARD_FOLDERS,
+        "msg": msg, "msg_n": n,
     })

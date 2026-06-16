@@ -18,6 +18,38 @@ except ImportError:
 
 _EXECUTOR = ThreadPoolExecutor(max_workers=4, thread_name_prefix="indexer")
 
+def _ocr_image(abs_path: str, api_key: str) -> str:
+    """Extract text from an image via Claude Vision. Returns empty string on any failure."""
+    path = Path(abs_path)
+    try:
+        if path.stat().st_size > 5 * 1024 * 1024:
+            return ""  # skip files over 5 MB to stay within vision limits
+        import base64, anthropic
+        ext  = path.suffix.lower()
+        mime = "image/png" if ext == ".png" else "image/jpeg"
+        b64  = base64.standard_b64encode(path.read_bytes()).decode()
+        ai   = anthropic.Anthropic(api_key=api_key)
+        msg  = ai.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=2000,
+            messages=[{
+                "role": "user",
+                "content": [
+                    {"type": "image", "source": {"type": "base64", "media_type": mime, "data": b64}},
+                    {"type": "text", "text": (
+                        "Extract all text from this document image. "
+                        "Return only the raw text, preserving layout as much as possible. "
+                        "Include all numbers, dates, names, and labels. "
+                        "If this is not a document, return an empty string."
+                    )},
+                ]
+            }]
+        )
+        return msg.content[0].text.strip()
+    except Exception:
+        return ""
+
+
 def extract_text(abs_path: str) -> tuple[str, int]:
     """Returns (text, page_count). Never raises."""
     path = Path(abs_path)
@@ -30,6 +62,10 @@ def extract_text(abs_path: str) -> tuple[str, int]:
             doc.close()
             return text.strip(), pages
         elif ext in {".jpg", ".jpeg", ".png"}:
+            from database import setting
+            api_key = setting("anthropic_api_key")
+            if api_key:
+                return _ocr_image(abs_path, api_key), 1
             return "", 1
     except Exception:
         pass
@@ -72,6 +108,27 @@ def reindex_all():
         for r in rows
     ]
     return len(futures)
+
+def reindex_images(client_id: int = None):
+    """Re-index image documents. Pass client_id to limit to one client."""
+    with get_db() as db:
+        if client_id:
+            rows = db.execute(
+                "SELECT id, abs_path, client_id, category, filename FROM documents "
+                "WHERE mime_type IN ('image/jpeg', 'image/png') AND client_id=?",
+                (client_id,)
+            ).fetchall()
+        else:
+            rows = db.execute(
+                "SELECT id, abs_path, client_id, category, filename FROM documents "
+                "WHERE mime_type IN ('image/jpeg', 'image/png')"
+            ).fetchall()
+    futures = [
+        _EXECUTOR.submit(index_document, r["id"], r["abs_path"], r["client_id"], r["category"], r["filename"])
+        for r in rows
+    ]
+    return len(futures)
+
 
 def index_single_file(abs_path: str):
     with get_db() as db:

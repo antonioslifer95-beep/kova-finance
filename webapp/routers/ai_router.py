@@ -58,6 +58,10 @@ def ai_stream(request: Request, q: str, client_id: int = None):
                 except Exception:
                     pass
                 continue
+            if chunk.startswith("<!--CLIENT:") and chunk.endswith("-->"):
+                client_name = chunk[11:-3]
+                yield f"event: client\ndata: {json.dumps(client_name)}\n\n"
+                continue
             full_response.append(chunk)
             yield f"data: {json.dumps(chunk)}\n\n"
 

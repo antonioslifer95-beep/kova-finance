@@ -1,0 +1,157 @@
+{% extends "base.html" %}
+{% block title %}Gerar Pacote — {{ client.folder_name }}{% endblock %}
+
+{% block content %}
+<div class="max-w-4xl mx-auto">
+
+  <!-- Header -->
+  <div class="flex items-center gap-3 mb-6">
+    <a href="/clients/{{ client.id }}"
+       class="text-gray-500 hover:text-gray-300 transition-colors">
+      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
+      </svg>
+    </a>
+    <div>
+      <h1 class="text-xl font-semibold text-gray-100">Gerar Pacote</h1>
+      <p class="text-sm text-gray-500">{{ client.folder_name }}</p>
+    </div>
+  </div>
+
+  <form method="post" action="/clients/{{ client.id }}/package/generate">
+    <input type="hidden" name="person_count" value="{{ persons|length }}">
+
+    <!-- Person cards -->
+    <div class="grid gap-4 mb-6
+      {% if persons|length == 1 %}grid-cols-1
+      {% elif persons|length == 2 %}grid-cols-2
+      {% else %}grid-cols-3{% endif %}">
+
+      {% for p in persons %}
+      {% set i = loop.index0 %}
+      <input type="hidden" name="p{{ i }}_key"    value="{{ p.key }}">
+      <input type="hidden" name="p{{ i }}_fiador" value="{{ '1' if p.is_fiador else '0' }}">
+
+      <div class="bg-gray-900 border rounded-xl overflow-hidden
+        {% if p.is_fiador %}border-gray-600{% else %}border-indigo-800/60{% endif %}">
+
+        <!-- Card header -->
+        <div class="px-4 py-2.5
+          {% if p.is_fiador %}bg-gray-700{% else %}bg-indigo-700{% endif %}">
+          <span class="text-sm font-semibold text-white">
+            {% if p.is_fiador %}
+              Fiador
+            {% elif persons|selectattr('is_fiador','equalto',false)|list|length > 1 %}
+              Requerente {{ loop.index }}
+            {% else %}
+              Requerente
+            {% endif %}
+          </span>
+        </div>
+
+        <div class="p-4 space-y-3">
+
+          <!-- Extracted / editable fields -->
+          {% set ex = p.extracted %}
+
+          <div>
+            <label class="block text-xs text-gray-500 mb-1">Nome completo</label>
+            <input type="text" name="p{{ i }}_name"
+                   value="{{ ex.get('name', p.name) if ex else p.name }}"
+                   class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm
+                          text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
+          </div>
+
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs text-gray-500 mb-1">Idade</label>
+              <input type="number" name="p{{ i }}_age" min="18" max="99"
+                     value="{{ ex.get('age', '') if ex else '' }}"
+                     class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm
+                            text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
+            </div>
+            <div>
+              <label class="block text-xs text-gray-500 mb-1">NIF</label>
+              <input type="text" name="p{{ i }}_nif" maxlength="11"
+                     value="{{ ex.get('nif', '') if ex else '' }}"
+                     class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm
+                            text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
+            </div>
+          </div>
+
+          <div>
+            <label class="block text-xs text-gray-500 mb-1">Telefone</label>
+            <input type="text" name="p{{ i }}_phone"
+                   class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm
+                          text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
+          </div>
+
+          <div>
+            <label class="block text-xs text-gray-500 mb-1">Email</label>
+            <input type="email" name="p{{ i }}_email"
+                   class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm
+                          text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
+          </div>
+
+          <div>
+            <label class="block text-xs text-gray-500 mb-1">Rendimento mensal médio (€)</label>
+            <input type="number" name="p{{ i }}_income" min="0" step="0.01"
+                   value="{{ ex.get('monthly_income', '') if ex else '' }}"
+                   class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm
+                          text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
+          </div>
+
+          <div>
+            <label class="block text-xs text-gray-500 mb-1">Responsabilidades de crédito (€/mês)</label>
+            <input type="number" name="p{{ i }}_crc" min="0" step="0.01"
+                   value="{{ ex.get('crc_total', '') if ex else '' }}"
+                   class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm
+                          text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
+          </div>
+
+          {% if ex %}
+          <p class="text-xs text-indigo-400/70">Os campos a cinza foram preenchidos automaticamente — verifique antes de gerar.</p>
+          {% else %}
+          <p class="text-xs text-amber-400/70">Sem documentos indexados — preencha manualmente.</p>
+          {% endif %}
+
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+
+    <!-- Operation section -->
+    <div class="bg-gray-900 border border-gray-800 rounded-xl p-5 mb-6">
+      <h2 class="text-sm font-semibold text-gray-300 mb-4">Operação de Crédito</h2>
+      <div class="grid grid-cols-2 gap-4">
+        <div>
+          <label class="block text-xs text-gray-500 mb-1">Montante solicitado (€)</label>
+          <input type="number" name="mortgage_amount" min="0" step="1000"
+                 class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm
+                        text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
+        </div>
+        <div>
+          <label class="block text-xs text-gray-500 mb-1">Valor do imóvel (€)</label>
+          <input type="number" name="property_value" min="0" step="1000"
+                 class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm
+                        text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
+        </div>
+      </div>
+    </div>
+
+    <!-- Generate button -->
+    <div class="flex justify-end">
+      <button type="submit"
+              class="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white
+                     px-6 py-2.5 rounded-xl text-sm font-medium transition-colors">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+        </svg>
+        Gerar PDFs
+      </button>
+    </div>
+
+  </form>
+</div>
+{% endblock %}

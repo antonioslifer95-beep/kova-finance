@@ -70,3 +70,10 @@ def reindex(request: Request):
     from services.indexer import reindex_all
     n = reindex_all()
     return RedirectResponse(f"/settings?msg=Re-indexing+{n}+documents", status_code=302)
+
+@router.post("/indexer/reindex-images")
+def reindex_images(request: Request):
+    require_admin(request)
+    from services.indexer import reindex_images as _reindex_images
+    n = _reindex_images()
+    return RedirectResponse(f"/settings?msg=OCR+started+for+{n}+image+files", status_code=302)

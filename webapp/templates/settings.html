@@ -52,12 +52,27 @@
   <div class="bg-gray-900 rounded-xl border border-gray-800 p-5">
     <h2 class="text-base font-medium text-gray-200 mb-1">Search Index</h2>
     <p class="text-xs text-gray-500 mb-4">Re-extract and index text from all documents for search and AI Q&A</p>
-    <form method="post" action="/indexer/reindex">
-      <button type="submit"
-              class="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg text-sm transition-colors">
-        Re-index all documents
-      </button>
-    </form>
+    <div class="flex flex-wrap gap-2">
+      <form method="post" action="/indexer/reindex">
+        <button type="submit"
+                class="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg text-sm transition-colors">
+          Re-index all documents
+        </button>
+      </form>
+      {% if api_key %}
+      <form method="post" action="/indexer/reindex-images">
+        <button type="submit"
+                class="bg-indigo-900/50 hover:bg-indigo-800/60 border border-indigo-700/50 text-indigo-300 px-4 py-2 rounded-lg text-sm transition-colors">
+          OCR image files
+        </button>
+      </form>
+      {% endif %}
+    </div>
+    {% if api_key %}
+    <p class="text-xs text-gray-600 mt-2">OCR uses Claude Vision to extract text from JPG/PNG payslips and scanned docs.</p>
+    {% else %}
+    <p class="text-xs text-amber-600 mt-2">Configure an API key above to enable OCR of image files.</p>
+    {% endif %}
   </div>
 
   <!-- Users -->
