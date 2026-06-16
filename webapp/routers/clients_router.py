@@ -223,4 +223,5 @@ def client_detail(request: Request, client_id: int, msg: str = "", n: int = 0):
         "missing": missing,
         "std_folders": STANDARD_FOLDERS,
         "msg": msg, "msg_n": n,
+        "token": request.cookies.get("kova_token", ""),
     })

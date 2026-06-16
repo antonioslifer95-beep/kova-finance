@@ -34,7 +34,8 @@ def get_token(request: Request) -> Optional[str]:
     header = request.headers.get("Authorization", "")
     if header.startswith("Bearer "):
         return header[7:]
-    return None
+    # Query param fallback — used by iframe/embedded previews where cookies aren't sent
+    return request.query_params.get("token") or None
 
 def current_user(request: Request) -> dict:
     token = get_token(request)
