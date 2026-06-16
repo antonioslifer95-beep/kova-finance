@@ -26,7 +26,14 @@ async def do_login(request: Request, response: Response,
             {"request": request, "error": "Invalid username or password"}, status_code=401)
     token = create_token(user["id"], user["username"], user["role"])
     resp  = RedirectResponse("/", status_code=302)
-    resp.set_cookie("kova_token", token, httponly=True, samesite="lax", max_age=3600*8)
+    # Use SameSite=None;Secure over HTTPS (ngrok/production) so cookies work
+    # inside a cross-origin iframe (Capacitor shell). Fall back to lax on HTTP.
+    is_https = (request.url.scheme == "https" or
+                request.headers.get("x-forwarded-proto") == "https")
+    resp.set_cookie("kova_token", token, httponly=True,
+                    samesite="none" if is_https else "lax",
+                    secure=is_https,
+                    max_age=3600*8)
     return resp
 
 @router.post("/logout")
