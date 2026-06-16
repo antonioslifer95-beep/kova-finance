@@ -294,23 +294,10 @@ function docViewer(token) {
       }
     },
 
-    async shareFile() {
-      if (!this.shareBlob) return;
-      const filename = this.previewName || 'document';
-      const file = new File([this.shareBlob], filename, {type: this.previewMime});
-      try {
-        if (navigator.canShare && navigator.canShare({files: [file]})) {
-          await navigator.share({files: [file], title: filename});
-        } else {
-          // Fallback: trigger browser download
-          const url = URL.createObjectURL(this.shareBlob);
-          const a = document.createElement('a');
-          a.href = url; a.download = filename; a.click();
-          setTimeout(() => URL.revokeObjectURL(url), 1000);
-        }
-      } catch(e) {
-        if (e.name !== 'AbortError') console.error('Share failed:', e);
-      }
+    shareFile() {
+      // Open in system browser (Chrome on Android) — handles download + share natively
+      const url = window.location.origin + '/documents/' + this.preview + '/download?token={{ token }}';
+      window.open(url, '_system');
     },
 
     close() {
