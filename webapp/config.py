@@ -26,6 +26,6 @@ REQUIRED_PER_PERSON = {"Documentos Pessoais", "Rendimentos", "Mapa CRC"}
 REQUIRED_SHARED     = {"RGPD"}
 REQUIRED_CATEGORIES = REQUIRED_PER_PERSON | REQUIRED_SHARED
 
-SKIP_NAMES = {".claude", ".git", "standby", "despesas valencia", "nova pasta", "_claude_review", "webapp"}
+SKIP_NAMES = {".claude", ".git", "standby", "despesas valencia", "nova pasta", "_claude_review", "webapp", "kova-app"}
 IMAGE_EXTS = {".jpg", ".jpeg", ".png"}
 DOC_EXTS   = {".pdf"} | IMAGE_EXTS
