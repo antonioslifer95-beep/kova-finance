@@ -6,59 +6,69 @@
 <div x-data="{ preview: null, previewName: '' }">
 
   <!-- Header -->
-  <div class="flex items-center gap-3 mb-4">
-    <a href="/dashboard" class="text-gray-500 hover:text-gray-300 transition-colors">
+  <div class="flex items-center gap-2 mb-4">
+    <a href="/dashboard" class="text-gray-500 hover:text-gray-300 transition-colors flex-shrink-0">
       <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
       </svg>
     </a>
-    <div>
-      <h1 class="text-xl font-semibold text-gray-100">{{ client.folder_name }}</h1>
-      <p class="text-sm text-gray-500">{{ stats.total }} documents</p>
+    <div class="min-w-0">
+      <h1 class="text-base sm:text-xl font-semibold text-gray-100 truncate">{{ client.folder_name }}</h1>
+      <p class="text-xs sm:text-sm text-gray-500">{{ stats.total }} documents</p>
     </div>
-    <div class="ml-auto flex items-center gap-2 flex-wrap">
-      {% if missing %}
-        {% for m in missing %}
-        <span class="text-xs px-2 py-1 rounded bg-red-900/40 text-red-400 border border-red-800">
-          Missing: {{ m }}
-        </span>
-        {% endfor %}
-      {% endif %}
+    <div class="ml-auto flex items-center gap-2 flex-shrink-0">
+      <!-- OCR: icon only on mobile -->
       <form method="post" action="/clients/{{ client.id }}/ocr-images">
-        <button type="submit" title="Run OCR on image files for this client"
-                class="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg
+        <button type="submit" title="OCR scanned files"
+                class="flex items-center gap-1.5 text-xs px-2 sm:px-3 py-1.5 rounded-lg
                        bg-gray-800 hover:bg-gray-700 border border-gray-700
                        text-gray-400 hover:text-gray-200 transition-colors">
           <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                   d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
           </svg>
-          OCR scanned files
+          <span class="hidden sm:inline">OCR scanned files</span>
         </button>
       </form>
+      <!-- Package: icon only on mobile -->
       <a href="/clients/{{ client.id }}/package"
-         class="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg
+         class="flex items-center gap-1.5 text-xs px-2 sm:px-3 py-1.5 rounded-lg
                 bg-indigo-700 hover:bg-indigo-600 border border-indigo-600
                 text-white transition-colors">
         <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                 d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/>
         </svg>
-        Gerar Pacote
+        <span class="hidden sm:inline">Gerar Pacote</span>
       </a>
     </div>
   </div>
 
-  {% if msg == 'ocr' %}
-  <div class="mb-4 px-4 py-2.5 bg-indigo-900/30 border border-indigo-700/50 rounded-lg text-indigo-300 text-sm">
-    OCR queued for {{ msg_n }} image file{{ 's' if msg_n != 1 else '' }} — results will be available once indexing completes.
+  <!-- Missing badges — desktop only (would clutter mobile header) -->
+  {% if missing %}
+  <div class="hidden sm:flex flex-wrap gap-1 mb-3">
+    {% for m in missing %}
+    <span class="text-xs px-2 py-1 rounded bg-red-900/40 text-red-400 border border-red-800">
+      Missing: {{ m }}
+    </span>
+    {% endfor %}
   </div>
   {% endif %}
 
-  <div class="flex gap-6 h-[calc(100vh-10rem)]">
+  {% if msg == 'ocr' %}
+  <div class="mb-4 px-4 py-2.5 bg-indigo-900/30 border border-indigo-700/50 rounded-lg text-indigo-300 text-sm">
+    OCR queued for {{ msg_n }} image file{{ 's' if msg_n != 1 else '' }} — results available once indexing completes.
+  </div>
+  {% endif %}
 
-    <!-- Left: Document tree -->
-    <div class="w-72 flex-shrink-0 space-y-1 overflow-y-auto scrollbar-thin pr-1">
+  <!-- Main layout: stacked on mobile, side-by-side on desktop -->
+  <div class="flex flex-col sm:flex-row gap-4 sm:gap-6"
+       style="height: calc(100dvh - 11rem);">
+
+    <!-- Document tree: full width on mobile, hidden when preview open on mobile -->
+    <div class="w-full sm:w-72 sm:flex-shrink-0 overflow-y-auto scrollbar-thin sm:pr-1 space-y-1"
+         :class="preview ? 'hidden sm:block' : 'block'">
+
       {% set cat_icons = {
         'Documentos Pessoais': '🪪',
         'Rendimentos': '💶',
@@ -74,29 +84,25 @@
       {% for sc, cats in subclients.items() %}
 
         {% if has_subclients %}
-          <!-- Sub-client header -->
-          <div class="flex items-center gap-2 px-2 pt-3 pb-1">
-            {% if sc %}
-              <span class="text-xs font-semibold uppercase tracking-wider text-indigo-400">{{ sc }}</span>
-              {% if sc_missing.get(sc) %}
-                {% for m in sc_missing[sc] %}
-                <span class="text-xs px-1.5 py-0.5 rounded bg-red-900/40 text-red-400 border border-red-800">
-                  {{ m }}
-                </span>
-                {% endfor %}
-              {% endif %}
-            {% else %}
-              <span class="text-xs font-semibold uppercase tracking-wider text-gray-500">Partilhado</span>
+        <div class="flex items-center gap-2 px-2 pt-3 pb-1">
+          {% if sc %}
+            <span class="text-xs font-semibold uppercase tracking-wider text-indigo-400">{{ sc }}</span>
+            {% if sc_missing.get(sc) %}
+              {% for m in sc_missing[sc] %}
+              <span class="text-xs px-1.5 py-0.5 rounded bg-red-900/40 text-red-400 border border-red-800">{{ m }}</span>
+              {% endfor %}
             {% endif %}
-          </div>
+          {% else %}
+            <span class="text-xs font-semibold uppercase tracking-wider text-gray-500">Partilhado</span>
+          {% endif %}
+        </div>
         {% endif %}
 
-        <!-- Category groups for this sub-client -->
         {% for cat, docs in cats.items() %}
         <div x-data="{ open: '{{ cat }}' !== 'Sem categoria' }"
              class="bg-gray-900 rounded-lg border border-gray-800 {% if has_subclients %}ml-2{% endif %}">
           <button @click="open=!open"
-                  class="w-full flex items-center justify-between px-3 py-2.5 text-sm font-medium text-gray-300 hover:text-white">
+                  class="w-full flex items-center justify-between px-3 py-3 text-sm font-medium text-gray-300 hover:text-white">
             <span class="flex items-center gap-2">
               <span>{{ cat_icons.get(cat, '📁') }}</span>
               <span>{{ cat }}</span>
@@ -112,7 +118,7 @@
           <div x-show="open" x-cloak class="border-t border-gray-800">
             {% for doc in docs %}
             <button @click="preview='{{ doc.id }}'; previewName='{{ doc.filename|replace("'","\\'")|truncate(35) }}'"
-                    class="w-full text-left px-3 py-2 text-xs text-gray-400 hover:bg-gray-800 hover:text-gray-200
+                    class="w-full text-left px-3 py-2.5 text-xs text-gray-400 hover:bg-gray-800 hover:text-gray-200
                            transition-colors flex items-center gap-2 group"
                     :class="preview=='{{ doc.id }}' ? 'bg-gray-800 text-gray-200' : ''">
               <svg class="w-3 h-3 flex-shrink-0 text-gray-600 group-hover:text-indigo-400" fill="currentColor" viewBox="0 0 20 20">
@@ -128,40 +134,57 @@
       {% endfor %}
     </div>
 
-    <!-- Right: Preview pane -->
-    <div class="flex-1 bg-gray-900 rounded-xl border border-gray-800 overflow-hidden flex flex-col">
+    <!-- Preview pane: hidden on mobile until doc selected, then full screen -->
+    <div class="flex-1 bg-gray-900 rounded-xl border border-gray-800 overflow-hidden flex flex-col"
+         :class="preview ? 'flex' : 'hidden sm:flex'">
+
+      <!-- Empty state -->
       <div x-show="!preview" class="flex-1 flex items-center justify-center text-gray-600">
         <div class="text-center">
           <svg class="w-12 h-12 mx-auto mb-3 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1"
+                  d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
           </svg>
           <p class="text-sm">Select a document to preview</p>
         </div>
       </div>
+
       <template x-if="preview">
         <div class="flex flex-col h-full">
-          <div class="flex items-center justify-between px-4 py-2.5 border-b border-gray-800">
-            <span x-text="previewName" class="text-sm text-gray-300 truncate"></span>
+          <!-- Preview toolbar -->
+          <div class="flex items-center justify-between px-3 py-2.5 border-b border-gray-800 gap-2">
+            <!-- Back button — mobile only -->
+            <button @click="preview=null"
+                    class="sm:hidden flex items-center gap-1 text-sm text-gray-400 hover:text-gray-200 flex-shrink-0">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
+              </svg>
+              Docs
+            </button>
+            <span x-text="previewName" class="text-xs sm:text-sm text-gray-300 truncate flex-1"></span>
             <div class="flex gap-2 flex-shrink-0">
               <a :href="'/documents/' + preview + '/download'"
                  class="text-xs text-gray-400 hover:text-indigo-400 px-2 py-1 rounded hover:bg-gray-800 transition-colors">
                 Download
               </a>
-              <button @click="preview=null" class="text-gray-500 hover:text-gray-300 transition-colors">
+              <button @click="preview=null"
+                      class="hidden sm:block text-gray-500 hover:text-gray-300 transition-colors">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
                 </svg>
               </button>
             </div>
           </div>
-          <div class="flex-1 bg-gray-950">
+          <!-- Document viewer -->
+          <div class="flex-1 bg-gray-950 overflow-auto">
             <object :data="'/documents/' + preview + '/preview'" type="application/pdf"
-                    class="w-full h-full">
+                    class="w-full h-full min-h-[60vh]">
               <img :src="'/documents/' + preview + '/preview'" class="max-w-full h-auto mx-auto"/>
             </object>
           </div>
         </div>
       </template>
+
     </div>
 
   </div>
