@@ -3,7 +3,7 @@
 {% block mob_dashboard %}active{% endblock %}
 
 {% block content %}
-<div x-data="{ preview: null, previewName: '', previewMime: '' }">
+<div x-data="docViewer('{{ token }}')" x-init="init()">
 
   <!-- Header -->
   <div class="flex items-center gap-2 mb-4">
@@ -117,10 +117,10 @@
           </button>
           <div x-show="open" x-cloak class="border-t border-gray-800">
             {% for doc in docs %}
-            <button @click="preview='{{ doc.id }}'; previewName='{{ doc.filename|replace("'","\\'")|truncate(35) }}'; previewMime='{{ doc.mime_type }}'"
+            <button @click="open('{{ doc.id }}', '{{ doc.filename|replace("'","\\'")|truncate(35) }}', '{{ doc.mime_type }}')"
                     class="w-full text-left px-3 py-2.5 text-xs text-gray-400 hover:bg-gray-800 hover:text-gray-200
                            transition-colors flex items-center gap-2 group"
-                    :class="preview=='{{ doc.id }}' ? 'bg-gray-800 text-gray-200' : ''">
+                    :class="preview==='{{ doc.id }}' ? 'bg-gray-800 text-gray-200' : ''">
               <svg class="w-3 h-3 flex-shrink-0 text-gray-600 group-hover:text-indigo-400" fill="currentColor" viewBox="0 0 20 20">
                 <path d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z"/>
               </svg>
@@ -139,7 +139,7 @@
          :class="preview ? 'flex' : 'hidden sm:flex'">
 
       <!-- Empty state -->
-      <div x-show="!preview" class="flex-1 flex items-center justify-center text-gray-600">
+      <div x-show="!preview && !loading" class="flex-1 flex items-center justify-center text-gray-600">
         <div class="text-center">
           <svg class="w-12 h-12 mx-auto mb-3 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1"
@@ -149,51 +149,89 @@
         </div>
       </div>
 
-      <template x-if="preview">
-        <div class="flex flex-col h-full">
-          <!-- Preview toolbar -->
-          <div class="flex items-center justify-between px-3 py-2.5 border-b border-gray-800 gap-2">
-            <!-- Back button — mobile only -->
-            <button @click="preview=null"
-                    class="sm:hidden flex items-center gap-1 text-sm text-gray-400 hover:text-gray-200 flex-shrink-0">
+      <!-- Loading spinner -->
+      <div x-show="loading" class="flex-1 flex items-center justify-center text-gray-500">
+        <svg class="w-7 h-7 animate-spin" fill="none" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path>
+        </svg>
+      </div>
+
+      <!-- Toolbar + viewer -->
+      <div x-show="preview && !loading" class="flex flex-col" style="height:100%;">
+        <div class="flex items-center justify-between px-3 py-2.5 border-b border-gray-800 gap-2 flex-shrink-0">
+          <button @click="close()"
+                  class="sm:hidden flex items-center gap-1 text-sm text-gray-400 hover:text-gray-200 flex-shrink-0">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
+            </svg>
+            Docs
+          </button>
+          <span x-text="previewName" class="text-xs sm:text-sm text-gray-300 truncate flex-1"></span>
+          <div class="flex gap-2 flex-shrink-0">
+            <a :href="'/documents/' + preview + '/download?token={{ token }}'"
+               class="text-xs text-gray-400 hover:text-indigo-400 px-2 py-1 rounded hover:bg-gray-800 transition-colors">
+              Download
+            </a>
+            <button @click="close()" class="hidden sm:block text-gray-500 hover:text-gray-300 transition-colors">
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
               </svg>
-              Docs
             </button>
-            <span x-text="previewName" class="text-xs sm:text-sm text-gray-300 truncate flex-1"></span>
-            <div class="flex gap-2 flex-shrink-0">
-              <a :href="'/documents/' + preview + '/download'"
-                 class="text-xs text-gray-400 hover:text-indigo-400 px-2 py-1 rounded hover:bg-gray-800 transition-colors">
-                Download
-              </a>
-              <button @click="preview=null"
-                      class="hidden sm:block text-gray-500 hover:text-gray-300 transition-colors">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
-                </svg>
-              </button>
-            </div>
-          </div>
-          <!-- Document viewer: absolute fill so height is always correct -->
-          <div class="flex-1 relative min-h-0">
-            <template x-if="previewMime === 'application/pdf'">
-              <iframe :src="'/documents/' + preview + '/preview?token={{ token }}'"
-                      style="position:absolute;top:0;left:0;width:100%;height:100%;border:0;background:#111;"></iframe>
-            </template>
-            <template x-if="previewMime !== 'application/pdf'">
-              <div style="position:absolute;top:0;left:0;width:100%;height:100%;overflow:auto;"
-                   class="flex items-center justify-center bg-gray-950 p-3">
-                <img :src="'/documents/' + preview + '/preview?token={{ token }}'"
-                     style="max-width:100%;max-height:100%;object-fit:contain;"/>
-              </div>
-            </template>
           </div>
         </div>
-      </template>
+        <!-- Viewer: blob URL fed into iframe or img -->
+        <div class="flex-1 relative min-h-0 bg-gray-950">
+          <iframe x-show="previewMime === 'application/pdf'"
+                  :src="blobUrl"
+                  style="position:absolute;top:0;left:0;width:100%;height:100%;border:0;"></iframe>
+          <div x-show="previewMime !== 'application/pdf'"
+               style="position:absolute;top:0;left:0;width:100%;height:100%;overflow:auto;display:flex;align-items:center;justify-content:center;padding:12px;">
+            <img :src="blobUrl" style="max-width:100%;max-height:100%;object-fit:contain;"/>
+          </div>
+        </div>
+      </div>
 
     </div>
 
   </div>
 </div>
+
+<script>
+function docViewer(token) {
+  return {
+    preview: null,
+    previewName: '',
+    previewMime: '',
+    blobUrl: null,
+    loading: false,
+
+    init() {},
+
+    async open(docId, name, mime) {
+      if (this.blobUrl) { URL.revokeObjectURL(this.blobUrl); this.blobUrl = null; }
+      this.preview = docId;
+      this.previewName = name;
+      this.previewMime = mime || 'application/pdf';
+      this.loading = true;
+      try {
+        const resp = await fetch('/documents/' + docId + '/preview?token=' + token);
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        const blob = await resp.blob();
+        this.blobUrl = URL.createObjectURL(blob);
+      } catch(e) {
+        console.error('Preview failed:', e);
+        this.blobUrl = null;
+      } finally {
+        this.loading = false;
+      }
+    },
+
+    close() {
+      if (this.blobUrl) { URL.revokeObjectURL(this.blobUrl); this.blobUrl = null; }
+      this.preview = null;
+    }
+  };
+}
+</script>
 {% endblock %}

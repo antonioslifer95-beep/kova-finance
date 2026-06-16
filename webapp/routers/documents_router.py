@@ -24,7 +24,7 @@ def preview(request: Request, doc_id: int):
                         headers={"Content-Disposition": f'{disposition}; filename="{path.name}"'})
 
 @router.get("/documents/{doc_id}/download")
-def download(request: Request, doc_id: int):
+def download(request: Request, doc_id: int, token: str = None):
     current_user(request)
     with get_db() as db:
         doc = db.execute("SELECT * FROM documents WHERE id=?", (doc_id,)).fetchone()
