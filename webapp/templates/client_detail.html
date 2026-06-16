@@ -117,7 +117,7 @@
           </button>
           <div x-show="open" x-cloak class="border-t border-gray-800">
             {% for doc in docs %}
-            <button @click="open('{{ doc.id }}', '{{ doc.filename|replace("'","\\'")|truncate(35) }}', '{{ doc.mime_type }}')"
+            <button @click="openDoc('{{ doc.id }}', '{{ doc.filename|replace("'","\\'")|truncate(35) }}', '{{ doc.mime_type }}')"
                     class="w-full text-left px-3 py-2.5 text-xs text-gray-400 hover:bg-gray-800 hover:text-gray-200
                            transition-colors flex items-center gap-2 group"
                     :class="preview==='{{ doc.id }}' ? 'bg-gray-800 text-gray-200' : ''">
@@ -208,7 +208,7 @@ function docViewer(token) {
 
     init() {},
 
-    async open(docId, name, mime) {
+    async openDoc(docId, name, mime) {
       if (this.blobUrl) { URL.revokeObjectURL(this.blobUrl); this.blobUrl = null; }
       this.preview = docId;
       this.previewName = name;
