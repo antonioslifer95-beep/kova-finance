@@ -169,10 +169,15 @@
           </button>
           <span x-text="previewName" class="text-xs sm:text-sm text-gray-300 truncate flex-1"></span>
           <div class="flex gap-2 flex-shrink-0">
-            <a :href="'/documents/' + preview + '/download?token={{ token }}'"
-               class="text-xs text-gray-400 hover:text-indigo-400 px-2 py-1 rounded hover:bg-gray-800 transition-colors">
-              Download
-            </a>
+            <button @click="shareFile()"
+                    class="flex items-center gap-1.5 text-xs text-gray-400 hover:text-indigo-400
+                           px-2 py-1 rounded hover:bg-gray-800 transition-colors">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                      d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z"/>
+              </svg>
+              Share
+            </button>
             <button @click="close()" class="hidden sm:block text-gray-500 hover:text-gray-300 transition-colors">
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
@@ -223,6 +228,7 @@ function docViewer(token) {
     previewName: '',
     previewMime: '',
     blobUrl: null,
+    shareBlob: null,
     loading: false,
     fetchError: false,
 
@@ -247,10 +253,12 @@ function docViewer(token) {
 
         if (this.previewMime === 'application/pdf') {
           const arrayBuffer = await resp.arrayBuffer();
+          this.shareBlob = new Blob([arrayBuffer], {type: 'application/pdf'});
           this.loading = false;
           await this._renderPdf(arrayBuffer);
         } else {
           const blob = await resp.blob();
+          this.shareBlob = blob;
           this.blobUrl = URL.createObjectURL(blob);
           this.loading = false;
         }
@@ -286,8 +294,28 @@ function docViewer(token) {
       }
     },
 
+    async shareFile() {
+      if (!this.shareBlob) return;
+      const filename = this.previewName || 'document';
+      const file = new File([this.shareBlob], filename, {type: this.previewMime});
+      try {
+        if (navigator.canShare && navigator.canShare({files: [file]})) {
+          await navigator.share({files: [file], title: filename});
+        } else {
+          // Fallback: trigger browser download
+          const url = URL.createObjectURL(this.shareBlob);
+          const a = document.createElement('a');
+          a.href = url; a.download = filename; a.click();
+          setTimeout(() => URL.revokeObjectURL(url), 1000);
+        }
+      } catch(e) {
+        if (e.name !== 'AbortError') console.error('Share failed:', e);
+      }
+    },
+
     close() {
       if (this.blobUrl) { URL.revokeObjectURL(this.blobUrl); this.blobUrl = null; }
+      this.shareBlob = null;
       const container = document.getElementById('pdf-canvas-container');
       if (container) container.innerHTML = '';
       this.preview = null;
