@@ -11,208 +11,179 @@
       background: #0f1117;
       color: #e5e7eb;
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      min-height: 100dvh;
+      height: 100dvh;
+      overflow: hidden;
+    }
+
+    #connect-screen {
       display: flex;
       flex-direction: column;
       align-items: center;
       justify-content: center;
       padding: 2rem 1.5rem;
+      min-height: 100dvh;
     }
 
-    .logo-wrap {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      margin-bottom: 3rem;
+    #app-frame {
+      display: none;
+      position: fixed;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      border: 0;
+      background: #0f1117;
     }
+
+    .logo-wrap { display: flex; flex-direction: column; align-items: center; margin-bottom: 3rem; }
 
     .logo-icon {
-      width: 64px;
-      height: 64px;
-      background: #1e40af;
-      border-radius: 18px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
+      width: 64px; height: 64px;
+      background: #1e40af; border-radius: 18px;
+      display: flex; align-items: center; justify-content: center;
       margin-bottom: 1rem;
       box-shadow: 0 4px 24px rgba(37,99,235,0.35);
     }
-
     .logo-icon svg { width: 34px; height: 34px; }
-
-    .logo-title {
-      font-size: 1.5rem;
-      font-weight: 700;
-      letter-spacing: 0.08em;
-      color: #f9fafb;
-    }
-
-    .logo-sub {
-      font-size: 0.8rem;
-      color: #6b7280;
-      letter-spacing: 0.04em;
-      margin-top: 0.25rem;
-    }
+    .logo-title { font-size: 1.5rem; font-weight: 700; letter-spacing: 0.08em; color: #f9fafb; }
+    .logo-sub { font-size: 0.8rem; color: #6b7280; letter-spacing: 0.04em; margin-top: 0.25rem; }
 
     .card {
+      width: 100%; max-width: 380px;
+      background: #1a1d27; border: 1px solid #2a2d3a;
+      border-radius: 16px; padding: 1.75rem 1.5rem;
+    }
+    .card-title { font-size: 0.9rem; font-weight: 600; color: #d1d5db; margin-bottom: 0.4rem; }
+    .card-sub { font-size: 0.78rem; color: #6b7280; margin-bottom: 1.25rem; line-height: 1.5; }
+
+    label { display: block; font-size: 0.75rem; color: #9ca3af; margin-bottom: 0.4rem; }
+
+    input[type="url"] {
       width: 100%;
-      max-width: 380px;
-      background: #1a1d27;
-      border: 1px solid #2a2d3a;
-      border-radius: 16px;
-      padding: 1.75rem 1.5rem;
+      background: #111318; border: 1px solid #374151; border-radius: 10px;
+      padding: 0.75rem 1rem; color: #f3f4f6; font-size: 0.9rem;
+      outline: none; transition: border-color 0.15s; -webkit-appearance: none;
     }
-
-    .card-title {
-      font-size: 0.9rem;
-      font-weight: 600;
-      color: #d1d5db;
-      margin-bottom: 0.4rem;
-    }
-
-    .card-sub {
-      font-size: 0.78rem;
-      color: #6b7280;
-      margin-bottom: 1.25rem;
-      line-height: 1.5;
-    }
-
-    label {
-      display: block;
-      font-size: 0.75rem;
-      color: #9ca3af;
-      margin-bottom: 0.4rem;
-    }
-
-    input[type="url"], input[type="text"] {
-      width: 100%;
-      background: #111318;
-      border: 1px solid #374151;
-      border-radius: 10px;
-      padding: 0.75rem 1rem;
-      color: #f3f4f6;
-      font-size: 0.9rem;
-      outline: none;
-      transition: border-color 0.15s;
-      -webkit-appearance: none;
-    }
-
     input:focus { border-color: #3b82f6; }
 
     .btn {
-      display: block;
-      width: 100%;
-      margin-top: 1rem;
-      padding: 0.85rem;
-      background: #2563eb;
-      color: #fff;
-      font-size: 0.95rem;
-      font-weight: 600;
-      border: none;
-      border-radius: 10px;
-      cursor: pointer;
-      transition: background 0.15s;
-      -webkit-appearance: none;
+      display: block; width: 100%; margin-top: 1rem; padding: 0.85rem;
+      background: #2563eb; color: #fff; font-size: 0.95rem; font-weight: 600;
+      border: none; border-radius: 10px; cursor: pointer;
+      transition: background 0.15s; -webkit-appearance: none;
     }
-
     .btn:active { background: #1d4ed8; }
 
-    .hint {
-      margin-top: 1.25rem;
-      font-size: 0.73rem;
-      color: #4b5563;
-      line-height: 1.6;
-      text-align: center;
-    }
-
-    .hint code {
-      background: #1f2937;
-      border-radius: 4px;
-      padding: 1px 5px;
-      font-family: 'Courier New', monospace;
-      color: #93c5fd;
-    }
+    .hint { margin-top: 1.25rem; font-size: 0.73rem; color: #4b5563; line-height: 1.6; text-align: center; }
+    .hint code { background: #1f2937; border-radius: 4px; padding: 1px 5px; font-family: monospace; color: #93c5fd; }
 
     .error {
-      margin-top: 0.75rem;
-      padding: 0.6rem 0.85rem;
-      background: rgba(239,68,68,0.1);
-      border: 1px solid rgba(239,68,68,0.3);
-      border-radius: 8px;
-      color: #fca5a5;
-      font-size: 0.78rem;
-      display: none;
+      margin-top: 0.75rem; padding: 0.6rem 0.85rem;
+      background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3);
+      border-radius: 8px; color: #fca5a5; font-size: 0.78rem; display: none;
     }
   </style>
 </head>
 <body>
 
-  <div class="logo-wrap">
-    <div class="logo-icon">
-      <svg fill="none" stroke="white" stroke-width="1.8" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round"
-              d="M19 21H5a2 2 0 01-2-2V7l7-4 7 4v12a2 2 0 01-2 2z"/>
-        <path stroke-linecap="round" stroke-linejoin="round" d="M9 21V12h6v9"/>
-      </svg>
+  <!-- Connect screen -->
+  <div id="connect-screen">
+    <div class="logo-wrap">
+      <div class="logo-icon">
+        <svg fill="none" stroke="white" stroke-width="1.8" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M19 21H5a2 2 0 01-2-2V7l7-4 7 4v12a2 2 0 01-2 2z"/>
+          <path stroke-linecap="round" stroke-linejoin="round" d="M9 21V12h6v9"/>
+        </svg>
+      </div>
+      <div class="logo-title">KOVA FINANCE</div>
+      <div class="logo-sub">Intermediário de Crédito</div>
     </div>
-    <div class="logo-title">KOVA FINANCE</div>
-    <div class="logo-sub">Intermediário de Crédito</div>
+
+    <div class="card">
+      <div class="card-title">Ligar ao servidor</div>
+      <div class="card-sub">Introduz o endereço do servidor para aceder à aplicação.</div>
+      <label for="url-input">Endereço do servidor</label>
+      <input id="url-input" type="url"
+             placeholder="https://abc123.ngrok-free.app"
+             autocomplete="url" autocorrect="off" autocapitalize="none" spellcheck="false"/>
+      <div class="error" id="error-msg">Por favor introduz um endereço válido.</div>
+      <button class="btn" onclick="connect()">Ligar</button>
+      <p class="hint">
+        Inicia o servidor no PC e o ngrok.<br>
+        Cola o URL do ngrok acima.<br>
+        Exemplo: <code>https://abc123.ngrok-free.app</code>
+      </p>
+    </div>
   </div>
 
-  <div class="card">
-    <div class="card-title">Ligar ao servidor</div>
-    <div class="card-sub">Introduz o endereço do servidor para aceder à aplicação.</div>
-
-    <label for="url-input">Endereço do servidor</label>
-    <input id="url-input" type="url"
-           placeholder="https://abc123.ngrok-free.app"
-           autocomplete="url" autocorrect="off" autocapitalize="none" spellcheck="false"/>
-
-    <div class="error" id="error-msg">Por favor introduz um endereço válido.</div>
-
-    <button class="btn" onclick="connect()">Ligar</button>
-
-    <p class="hint">
-      Inicia o servidor no PC e o ngrok.<br>
-      Cola o URL do ngrok acima.<br>
-      Exemplo: <code>https://abc123.ngrok-free.app</code>
-    </p>
-  </div>
+  <!-- App iframe — Capacitor bridge stays alive in this parent page -->
+  <iframe id="app-frame" sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-top-navigation-by-user-activation"></iframe>
 
   <script>
-    const KEY = 'kova_server_url';
+    const KEY   = 'kova_server_url';
     const input = document.getElementById('url-input');
     const errEl = document.getElementById('error-msg');
+    const frame = document.getElementById('app-frame');
 
-    // Pre-fill last used URL
     const saved = localStorage.getItem(KEY);
     if (saved) input.value = saved;
 
-    // Connect on Enter key
     input.addEventListener('keydown', e => { if (e.key === 'Enter') connect(); });
 
     function connect() {
-      const raw = input.value.trim();
-      if (!raw) { showError('Por favor introduz um endereço válido.'); return; }
-
-      let url = raw;
-      // Auto-add https:// if missing
-      if (!url.startsWith('http://') && !url.startsWith('https://')) {
-        url = 'https://' + url;
-        input.value = url;
-      }
-
-      try {
-        new URL(url); // validate
-      } catch {
-        showError('Endereço inválido. Verifica o URL e tenta novamente.');
-        return;
-      }
-
+      let url = input.value.trim();
+      if (!url) { showError('Por favor introduz um endereço válido.'); return; }
+      if (!url.startsWith('http://') && !url.startsWith('https://')) url = 'https://' + url;
+      try { new URL(url); } catch { showError('Endereço inválido.'); return; }
       errEl.style.display = 'none';
       localStorage.setItem(KEY, url);
-      window.location.href = url;
+      launchApp(url);
     }
+
+    function launchApp(url) {
+      document.getElementById('connect-screen').style.display = 'none';
+      frame.src = url;
+      frame.style.display = 'block';
+    }
+
+    // Handle Android back — return to connect screen when iframe is at root
+    document.addEventListener('backbutton', () => {
+      frame.contentWindow.history.back();
+    }, false);
+
+    // ── Capacitor bridge for share requests from the webapp ───────────────
+    window.addEventListener('message', async (e) => {
+      if (!e.data || e.data.type !== 'kova-share') return;
+      try {
+        const Cap = window.Capacitor;
+        if (!Cap || !Cap.isNativePlatform || !Cap.isNativePlatform()) return;
+        const { Filesystem, Share } = Cap.Plugins;
+
+        const blob     = new Blob([e.data.buffer], { type: e.data.mimeType });
+        const filename = e.data.filename || 'document';
+
+        // base64 encode
+        const b64 = await new Promise((res, rej) => {
+          const r = new FileReader();
+          r.onload  = () => res(r.result.split(',')[1]);
+          r.onerror = rej;
+          r.readAsDataURL(blob);
+        });
+
+        const saved = await Filesystem.writeFile({
+          path: filename, data: b64, directory: 'CACHE',
+        });
+
+        await Share.share({
+          title: filename,
+          files: [saved.uri],
+          dialogTitle: 'Partilhar documento',
+        });
+
+        Filesystem.deleteFile({ path: filename, directory: 'CACHE' }).catch(() => {});
+
+      } catch(err) {
+        console.error('Capacitor share bridge error:', err);
+      }
+    });
 
     function showError(msg) {
       errEl.textContent = msg;

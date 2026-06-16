@@ -185,11 +185,6 @@
             </button>
           </div>
         </div>
-        <!-- Share debug output -->
-        <div x-show="shareDebug" x-text="shareDebug"
-             class="flex-shrink-0 px-3 py-2 bg-yellow-900/40 border-b border-yellow-700/40
-                    text-yellow-300 text-xs font-mono break-all"></div>
-
         <!-- Viewer -->
         <div class="flex-1 relative min-h-0 bg-gray-950" id="viewer-shell">
 
@@ -236,7 +231,6 @@ function docViewer(token) {
     shareBlob: null,
     loading: false,
     fetchError: false,
-    shareDebug: '',
 
     init() {
       if (typeof pdfjsLib !== 'undefined') {
@@ -303,43 +297,22 @@ function docViewer(token) {
     async shareFile() {
       if (!this.shareBlob) return;
       const filename = this.previewName || 'document';
-      const Cap = window.Capacitor;
 
-      // Debug info — shows on screen so we can see what's happening
-      const debug = [
-        'Cap: ' + (Cap ? 'yes' : 'no'),
-        'isNative: ' + (Cap && Cap.isNativePlatform ? Cap.isNativePlatform() : 'n/a'),
-        'FS: ' + (Cap && Cap.Plugins && Cap.Plugins.Filesystem ? 'yes' : 'no'),
-        'Share: ' + (Cap && Cap.Plugins && Cap.Plugins.Share ? 'yes' : 'no'),
-      ];
-      this.shareDebug = debug.join(' | ');
-
-      if (Cap && Cap.isNativePlatform && Cap.isNativePlatform()) {
+      // If inside Capacitor iframe shell, delegate to parent via postMessage
+      if (window.parent !== window) {
         try {
-          const { Filesystem, Share } = Cap.Plugins;
-          const b64 = await new Promise((res, rej) => {
-            const r = new FileReader();
-            r.onload  = () => res(r.result.split(',')[1]);
-            r.onerror = rej;
-            r.readAsDataURL(this.shareBlob);
-          });
-          const saved = await Filesystem.writeFile({
-            path: filename, data: b64, directory: 'CACHE',
-          });
-          this.shareDebug += ' | uri: ' + saved.uri;
-          await Share.share({
-            title: filename, files: [saved.uri], dialogTitle: 'Partilhar documento',
-          });
-          Filesystem.deleteFile({ path: filename, directory: 'CACHE' }).catch(() => {});
-          this.shareDebug = '';
+          const buf = await this.shareBlob.arrayBuffer();
+          window.parent.postMessage({
+            type: 'kova-share',
+            buffer: buf,
+            filename: filename,
+            mimeType: this.previewMime,
+          }, '*', [buf]);
           return;
-        } catch(e) {
-          this.shareDebug += ' | ERR: ' + e.message;
-          return;
-        }
+        } catch(e) { console.error('postMessage share failed:', e); }
       }
 
-      // Desktop fallback
+      // Desktop / browser fallback
       try {
         const file = new File([this.shareBlob], filename, { type: this.previewMime });
         if (navigator.canShare && navigator.canShare({ files: [file] })) {
@@ -347,6 +320,7 @@ function docViewer(token) {
           return;
         }
       } catch(e) { /* not supported */ }
+
       const url = URL.createObjectURL(this.shareBlob);
       const a = document.createElement('a');
       a.href = url; a.download = filename; a.click();
