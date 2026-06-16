@@ -59,6 +59,7 @@ async def generate_package(request: Request, client_id: int):
             "email":         form.get(f"p{i}_email", ""),
             "monthly_income": form.get(f"p{i}_income") or None,
             "crc_total":     form.get(f"p{i}_crc") or None,
+            "crc_shared":    form.get(f"p{i}_crc_shared") or 0,
             "is_fiador":     form.get(f"p{i}_fiador") == "1",
         })
 

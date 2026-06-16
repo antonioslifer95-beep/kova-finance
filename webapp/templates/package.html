@@ -108,6 +108,8 @@
                    class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm
                           text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
           </div>
+          <input type="hidden" name="p{{ i }}_crc_shared"
+                 value="{{ ex.get('crc_shared', 0) if ex else 0 }}">
 
           {% if ex %}
           <p class="text-xs text-indigo-400/70">Os campos a cinza foram preenchidos automaticamente — verifique antes de gerar.</p>

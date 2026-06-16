@@ -101,10 +101,11 @@ def extract_person_data(client_id: int, subclient_key: str) -> dict:
         f'- "age": integer age (calculate from birth date if needed; today is {today})\n'
         f'- "nif": 9-digit NIF\n'
         f'- "monthly_income": average monthly gross income in euros as a number\n'
-        f'- "crc_total": from the Mapa CRC document, sum the "Abatido ao ativo" values across all credit '
-        f'products — this is the monthly installment (prestação). '
-        f'Do NOT use "Total em dívida" (outstanding capital) or "Montante Potencial". '
-        f'If "Abatido ao ativo" is 0,00 for a product, do not count it. Return the total as a number.\n\n'
+        f'- "crc_total": from the Mapa CRC, sum ALL "Abatido ao ativo" values that are greater than 0 '
+        f'— this is the monthly installment (prestação). Do NOT use "Total em dívida" or "Montante Potencial".\n'
+        f'- "crc_shared": from the Mapa CRC, sum only the "Abatido ao ativo" values greater than 0 '
+        f'for credits where "Nº devedores no contrato" is 2 or more — these are joint credits shared '
+        f'with another person. If none, return 0.\n\n'
         f"Documents:\n{context}"
     )
     try:
@@ -318,7 +319,18 @@ def generate_summary_pdf(persons_data: list, operation: dict, output_path: str, 
     except Exception:
         total_income = 0
     try:
-        total_crc = sum(float(p.get("crc_total") or 0) for p in persons_data)
+        # Deduplicate shared credits: sum individual-only amounts, then add shared once.
+        # crc_total = individual + shared per person, so individual = crc_total - crc_shared.
+        # Correct total = sum(individual) + max(shared) so joint credits are counted only once.
+        individual_sum = sum(
+            float(p.get("crc_total") or 0) - float(p.get("crc_shared") or 0)
+            for p in persons_data
+        )
+        max_shared = max(
+            (float(p.get("crc_shared") or 0) for p in persons_data),
+            default=0
+        )
+        total_crc = individual_sum + max_shared
     except Exception:
         total_crc = 0
 
