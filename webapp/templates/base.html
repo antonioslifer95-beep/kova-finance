@@ -21,12 +21,20 @@
     .scrollbar-thin::-webkit-scrollbar { width: 4px; }
     .scrollbar-thin::-webkit-scrollbar-track { background: transparent; }
     .scrollbar-thin::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 2px; }
+    .nav-link {
+      display: flex; align-items: center; gap: 0.5rem;
+      padding: 0.5rem 0.75rem; border-radius: 0.5rem;
+      font-size: 0.875rem; color: #9ca3af;
+      transition: background-color 0.15s, color 0.15s;
+    }
+    .nav-link:hover { background: #1f2937; color: #e5e7eb; }
+    .nav-link.active { background: #1e1b4b; color: #818cf8; font-weight: 500; }
   </style>
 </head>
 <body class="bg-gray-950 text-gray-100 min-h-screen flex">
 
-  <!-- Sidebar -->
-  <aside class="w-56 bg-gray-900 border-r border-gray-800 flex flex-col fixed h-full z-20">
+  <!-- Sidebar — desktop only -->
+  <aside class="hidden sm:flex w-56 bg-gray-900 border-r border-gray-800 flex-col fixed h-full z-20">
     <div class="px-5 py-5 border-b border-gray-800">
       <span class="text-kova font-bold text-xl tracking-tight">Kova</span>
       <span class="text-gray-400 font-light text-xl"> Finance</span>
@@ -64,21 +72,77 @@
   </aside>
 
   <!-- Main content -->
-  <main class="ml-56 flex-1 min-h-screen">
-    <div class="max-w-7xl mx-auto px-6 py-8">
+  <main class="sm:ml-56 flex-1 min-h-screen pb-20 sm:pb-0">
+    <div class="max-w-7xl mx-auto px-3 py-4 sm:px-6 sm:py-8">
       {% block content %}{% endblock %}
     </div>
   </main>
 
+  <!-- Bottom nav — mobile only -->
+  <nav class="sm:hidden fixed bottom-0 left-0 right-0 z-30
+              bg-gray-900 border-t border-gray-800
+              flex items-stretch">
+
+    <a href="/dashboard"
+       class="mobile-nav-item {% block mob_dashboard %}{% endblock %}">
+      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7h18M3 12h18M3 17h18"/>
+      </svg>
+      <span>Dashboard</span>
+    </a>
+
+    <a href="/search"
+       class="mobile-nav-item {% block mob_search %}{% endblock %}">
+      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z"/>
+      </svg>
+      <span>Search</span>
+    </a>
+
+    <a href="/assistant"
+       class="mobile-nav-item {% block mob_assistant %}{% endblock %}">
+      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636-.707.707M21 12h-1M4 12H3m1.343-5.657-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/>
+      </svg>
+      <span>Assistant</span>
+    </a>
+
+    <a href="/organizer"
+       class="mobile-nav-item {% block mob_organizer %}{% endblock %}">
+      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h7"/>
+      </svg>
+      <span>Organizer</span>
+    </a>
+
+    {% if user and user.role == 'admin' %}
+    <a href="/settings"
+       class="mobile-nav-item {% block mob_settings %}{% endblock %}">
+      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><circle cx="12" cy="12" r="3"/>
+      </svg>
+      <span>Settings</span>
+    </a>
+    {% endif %}
+
+  </nav>
+
   <style>
-    .nav-link {
-      display: flex; align-items: center; gap: 0.5rem;
-      padding: 0.5rem 0.75rem; border-radius: 0.5rem;
-      font-size: 0.875rem; color: #9ca3af;
-      transition: background-color 0.15s, color 0.15s;
+    .mobile-nav-item {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 2px;
+      padding: 8px 4px 10px;
+      font-size: 0.65rem;
+      color: #6b7280;
+      transition: color 0.15s;
     }
-    .nav-link:hover { background: #1f2937; color: #e5e7eb; }
-    .nav-link.active { background: #1e1b4b; color: #818cf8; font-weight: 500; }
+    .mobile-nav-item:hover,
+    .mobile-nav-item.active { color: #818cf8; }
   </style>
+
 </body>
 </html>
