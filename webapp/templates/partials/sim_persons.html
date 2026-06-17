@@ -1,0 +1,54 @@
+<div class="bg-gray-900 border border-gray-800 rounded-xl p-5">
+  <h2 class="text-sm font-semibold text-gray-300 mb-4">Dados dos Requerentes</h2>
+  <input type="hidden" name="person_count" value="{{ persons|length }}">
+
+  <div class="grid gap-4
+    {% if persons|length == 1 %}grid-cols-1
+    {% elif persons|length == 2 %}grid-cols-2
+    {% else %}grid-cols-3{% endif %}">
+
+    {% for p in persons %}
+    {% set i = loop.index0 %}
+    {% set ex = p.extracted %}
+    <input type="hidden" name="p{{ i }}_key" value="{{ p.key }}">
+
+    <div class="bg-gray-800/50 border border-gray-700 rounded-xl overflow-hidden">
+      <div class="px-4 py-2.5 {% if p.is_fiador %}bg-gray-600{% else %}bg-indigo-700{% endif %}">
+        <span class="text-sm font-semibold text-white">
+          {% if p.is_fiador %}Fiador
+          {% elif persons|selectattr('is_fiador','equalto',false)|list|length > 1 %}Requerente {{ loop.index }}
+          {% else %}Requerente{% endif %}
+        </span>
+      </div>
+      <div class="p-4 space-y-3">
+        <div>
+          <label class="block text-xs text-gray-500 mb-1">Nome</label>
+          <input type="text" name="p{{ i }}_name"
+                 value="{{ ex.get('name', p.name) if ex else p.name }}"
+                 class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm
+                        text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
+        </div>
+        <div>
+          <label class="block text-xs text-gray-500 mb-1">Rendimento mensal médio (€)</label>
+          <input type="number" name="p{{ i }}_income" min="0" step="0.01"
+                 value="{{ ex.get('monthly_income', '') if ex else '' }}"
+                 class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm
+                        text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
+        </div>
+        <div>
+          <label class="block text-xs text-gray-500 mb-1">Responsabilidades de crédito (€/mês)</label>
+          <input type="number" name="p{{ i }}_crc" min="0" step="0.01"
+                 value="{{ ex.get('crc_total', '') if ex else '' }}"
+                 class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm
+                        text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
+        </div>
+        {% if ex %}
+        <p class="text-xs text-indigo-400/70">Dados preenchidos automaticamente — verifique antes de gerar.</p>
+        {% else %}
+        <p class="text-xs text-amber-400/70">Sem documentos indexados — preencha manualmente.</p>
+        {% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</div>

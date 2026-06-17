@@ -36,22 +36,7 @@ def download(request: Request, doc_id: int, token: str = None):
     return FileResponse(str(path),
                         headers={"Content-Disposition": f'attachment; filename="{path.name}"'})
 
-@router.get("/search", response_class=HTMLResponse)
-def search_page(request: Request, q: str = "", client_id: int = None):
-    from fastapi.templating import Jinja2Templates
-    from config import TEMPLATE_DIR
-    user = current_user(request)
-    results = []
-    if q:
-        from services.indexer import search
-        results = search(q, client_id=client_id, limit=20)
-    from fastapi.templating import Jinja2Templates
-    tmpl = Jinja2Templates(directory=str(TEMPLATE_DIR))
-    with get_db() as db:
-        clients = db.execute("SELECT id, folder_name FROM clients ORDER BY folder_name").fetchall()
-    return tmpl.TemplateResponse("search.html", {
-        "request": request, "user": user,
-        "query": q, "results": results,
-        "clients": [dict(c) for c in clients],
-        "sel_client": client_id,
-    })
+@router.get("/search")
+def search_page(request: Request):
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse("/simulation", status_code=301)

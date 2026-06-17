@@ -1,0 +1,46 @@
+<div class="bg-gray-900 border border-green-800/40 rounded-xl p-5">
+  <div class="flex items-center gap-3 mb-5">
+    <div class="w-9 h-9 bg-green-900/40 rounded-full flex items-center justify-center flex-shrink-0">
+      <svg class="w-5 h-5 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+      </svg>
+    </div>
+    <div>
+      <p class="text-sm font-semibold text-gray-100">Simulação gerada com sucesso</p>
+      <p class="text-xs text-gray-500 mt-0.5">Guardado em Proposta Crédito / {{ filename }}</p>
+    </div>
+  </div>
+
+  <!-- Summary strip -->
+  <div class="grid grid-cols-3 gap-3 bg-gray-800/50 rounded-xl p-4 mb-5">
+    <div>
+      <p class="text-xs text-gray-500 mb-1">Capital financiado</p>
+      <p class="text-base font-bold text-gray-200">€ {{ "{:,.2f}".format(summ.total_capital).replace(",", " ") }}</p>
+    </div>
+    <div>
+      <p class="text-xs text-gray-500 mb-1">Total de juros</p>
+      <p class="text-base font-bold text-amber-300">€ {{ "{:,.2f}".format(summ.total_interest).replace(",", " ") }}</p>
+    </div>
+    <div>
+      <p class="text-xs text-gray-500 mb-1">Custo total</p>
+      <p class="text-base font-bold text-white">€ {{ "{:,.2f}".format(summ.total_paid).replace(",", " ") }}</p>
+    </div>
+  </div>
+
+  <div class="flex gap-3">
+    <a href="/simulation/download?client_id={{ client.id }}&filename={{ filename }}"
+       class="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500
+              text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+      </svg>
+      Descarregar PDF
+    </a>
+    <a href="/clients/{{ client.id }}"
+       class="flex items-center gap-2 bg-gray-700 hover:bg-gray-600
+              text-gray-200 px-4 py-2 rounded-lg text-sm font-medium transition-colors">
+      Ver cliente
+    </a>
+  </div>
+</div>

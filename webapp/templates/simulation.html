@@ -1,0 +1,349 @@
+{% extends "base.html" %}
+{% block title %}Simulação — Kova Finance{% endblock %}
+{% block nav_simulation %}active{% endblock %}
+{% block mob_simulation %}active{% endblock %}
+
+{% block content %}
+<div class="max-w-4xl mx-auto" x-data="sim()">
+
+  <h1 class="text-xl font-semibold text-gray-100 mb-6">Simulação de Crédito</h1>
+
+  <form id="sim-form"
+        hx-post="/simulation/generate"
+        hx-target="#sim-result"
+        hx-swap="innerHTML"
+        hx-indicator="#gen-spinner">
+
+    <!-- CLIENT -->
+    <div class="bg-gray-900 border border-gray-800 rounded-xl p-5 mb-5">
+      <h2 class="text-sm font-semibold text-gray-300 mb-3">Cliente</h2>
+      <div>
+        <label class="block text-xs text-gray-500 mb-1">Selecionar cliente</label>
+        <select name="client_id"
+                class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm
+                       text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                hx-get="/simulation/client-data"
+                hx-target="#persons-section"
+                hx-trigger="change"
+                hx-indicator="#client-spinner">
+          <option value="">— Selecionar cliente —</option>
+          {% for c in clients %}
+          <option value="{{ c.id }}">{{ c.folder_name }}</option>
+          {% endfor %}
+        </select>
+        <span id="client-spinner" class="htmx-indicator inline-block mt-1">
+          <svg class="animate-spin w-4 h-4 text-indigo-400" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+          </svg>
+        </span>
+      </div>
+    </div>
+
+    <!-- PERSONS (HTMX-loaded) -->
+    <div id="persons-section" class="mb-5">
+      <div class="bg-gray-900 border border-gray-800 rounded-xl p-5 text-center text-sm text-gray-500 py-8">
+        Seleciona um cliente para carregar os dados dos requerentes.
+      </div>
+    </div>
+
+    <!-- OPERATION -->
+    <div class="bg-gray-900 border border-gray-800 rounded-xl p-5 mb-5">
+      <h2 class="text-sm font-semibold text-gray-300 mb-4">Operação</h2>
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div>
+          <label class="block text-xs text-gray-500 mb-1">Tipo de operação</label>
+          <select name="operation_type"
+                  class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm
+                         text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+            <option>Aquisição</option>
+            <option>Refinanciamento</option>
+            <option>Transferência de Crédito</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs text-gray-500 mb-1">Montante financiado (€)</label>
+          <input type="number" name="finance_amount" min="0" step="1000"
+                 x-model.number="financeAmount"
+                 class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm
+                        text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                 placeholder="ex: 180 000"/>
+        </div>
+        <div>
+          <label class="block text-xs text-gray-500 mb-1">Valor do imóvel (€)</label>
+          <input type="number" name="property_value" min="0" step="1000"
+                 x-model.number="propertyValue"
+                 class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm
+                        text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                 placeholder="ex: 220 000"/>
+          <template x-if="ltv !== null">
+            <p class="text-xs mt-1 font-medium"
+               :class="ltv > 90 ? 'text-red-400' : ltv > 80 ? 'text-amber-400' : 'text-emerald-400'">
+              LTV: <span x-text="ltv + '%'"></span>
+            </p>
+          </template>
+        </div>
+      </div>
+      <div class="mt-4 max-w-xs">
+        <label class="block text-xs text-gray-500 mb-1">Prazo (meses)</label>
+        <input type="number" name="term_months" min="12" max="480" step="1"
+               x-model.number="termMonths"
+               class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm
+                      text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+               placeholder="ex: 360"/>
+      </div>
+    </div>
+
+    <!-- RATE -->
+    <div class="bg-gray-900 border border-gray-800 rounded-xl p-5 mb-5">
+      <h2 class="text-sm font-semibold text-gray-300 mb-4">Taxa de Juro</h2>
+      <input type="hidden" name="rate_type" :value="rateType">
+
+      <!-- Type selector -->
+      <div class="flex gap-2 mb-5">
+        <template x-for="opt in [{v:'variable',l:'Variável'},{v:'fixed',l:'Fixa'},{v:'mixed',l:'Mista'}]" :key="opt.v">
+          <button type="button" @click="rateType = opt.v"
+                  :class="rateType === opt.v
+                    ? 'bg-indigo-600 text-white shadow'
+                    : 'bg-gray-800 text-gray-400 hover:text-gray-200'"
+                  class="px-4 py-1.5 rounded-lg text-sm font-medium transition-colors">
+            <span x-text="opt.l"></span>
+          </button>
+        </template>
+      </div>
+
+      <!-- EURIBOR + spread (variable or mixed) -->
+      <div x-show="rateType === 'variable' || rateType === 'mixed'" class="mb-4">
+        <div class="grid grid-cols-3 gap-4">
+          <div>
+            <label class="block text-xs text-gray-500 mb-1">Indexante</label>
+            <select name="euribor_period"
+                    class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm
+                           text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+              <option value="3M">EURIBOR 3 meses</option>
+              <option value="6M" selected>EURIBOR 6 meses</option>
+              <option value="12M">EURIBOR 12 meses</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs text-gray-500 mb-1">EURIBOR (%)</label>
+            <input type="number" name="euribor" step="0.001" min="-5" max="20"
+                   x-model.number="euribor"
+                   class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm
+                          text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                   placeholder="ex: 2.144"/>
+          </div>
+          <div>
+            <label class="block text-xs text-gray-500 mb-1">Spread (%)</label>
+            <input type="number" name="spread" step="0.001" min="0" max="10"
+                   x-model.number="spread"
+                   class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm
+                          text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                   placeholder="ex: 1.200"/>
+          </div>
+        </div>
+        <template x-if="(euribor || spread) && rateType === 'variable'">
+          <p class="text-xs text-gray-400 mt-2">
+            TAN = <span class="text-indigo-300 font-semibold" x-text="fmtPct(euribor + spread)"></span>
+          </p>
+        </template>
+      </div>
+
+      <!-- Fixed TAN (fixed or mixed) -->
+      <div x-show="rateType === 'fixed' || rateType === 'mixed'" class="mb-4">
+        <div class="grid grid-cols-3 gap-4">
+          <div>
+            <label class="block text-xs text-gray-500 mb-1"
+                   x-text="rateType === 'mixed' ? 'TAN Fixa (%)' : 'TAN (%)'"></label>
+            <input type="number" name="fixed_tan" step="0.001" min="0" max="20"
+                   x-model.number="fixedTan"
+                   class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm
+                          text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                   placeholder="ex: 2.500"/>
+          </div>
+          <!-- Mixed: fixed period -->
+          <div x-show="rateType === 'mixed'">
+            <label class="block text-xs text-gray-500 mb-1">Prazo fixo (meses)</label>
+            <input type="number" name="fixed_months" step="1" min="1"
+                   x-model.number="fixedMonths"
+                   class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm
+                          text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                   placeholder="ex: 60"/>
+          </div>
+          <!-- Mixed: show variable TAN summary -->
+          <div x-show="rateType === 'mixed'" class="flex items-end pb-2">
+            <p class="text-xs text-gray-400">
+              TAN variável:
+              <span class="text-indigo-300 font-semibold" x-text="fmtPct(euribor + spread)"></span>
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- LIVE PREVIEW -->
+    <template x-if="canPreview">
+      <div class="bg-indigo-950/40 border border-indigo-800/40 rounded-xl p-5 mb-5">
+        <p class="text-xs font-semibold text-indigo-400 uppercase tracking-wider mb-4">Pré-visualização</p>
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-5">
+          <div>
+            <p class="text-xs text-gray-500 mb-1">LTV</p>
+            <p class="text-xl font-bold"
+               :class="ltv > 90 ? 'text-red-400' : ltv > 80 ? 'text-amber-400' : 'text-emerald-400'"
+               x-text="ltv !== null ? ltv + '%' : '—'"></p>
+          </div>
+          <!-- Variable / Fixed: one payment -->
+          <template x-if="rateType !== 'mixed'">
+            <div>
+              <p class="text-xs text-gray-500 mb-1">Prestação mensal</p>
+              <p class="text-xl font-bold text-indigo-300" x-text="fmtEur(monthlyPayment)"></p>
+            </div>
+          </template>
+          <!-- Mixed: two payments -->
+          <template x-if="rateType === 'mixed'">
+            <div>
+              <p class="text-xs text-gray-500 mb-1">Prestação fase 1</p>
+              <p class="text-xl font-bold text-indigo-300" x-text="fmtEur(pmtPhase1)"></p>
+            </div>
+          </template>
+          <template x-if="rateType === 'mixed'">
+            <div>
+              <p class="text-xs text-gray-500 mb-1">Prestação fase 2</p>
+              <p class="text-xl font-bold text-indigo-300" x-text="fmtEur(pmtPhase2)"></p>
+            </div>
+          </template>
+          <div>
+            <p class="text-xs text-gray-500 mb-1">Total de juros</p>
+            <p class="text-xl font-bold text-amber-300" x-text="fmtEur(totalInterest)"></p>
+          </div>
+          <div>
+            <p class="text-xs text-gray-500 mb-1">Custo total</p>
+            <p class="text-xl font-bold text-white" x-text="fmtEur(totalCost)"></p>
+          </div>
+        </div>
+      </div>
+    </template>
+
+    <!-- GENERATE -->
+    <div class="flex justify-end items-center gap-3">
+      <span id="gen-spinner" class="htmx-indicator">
+        <svg class="animate-spin w-5 h-5 text-indigo-400" fill="none" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+        </svg>
+      </span>
+      <button type="submit"
+              class="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500
+                     text-white px-6 py-2.5 rounded-xl text-sm font-semibold transition-colors">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+        </svg>
+        Gerar Simulação
+      </button>
+    </div>
+
+  </form>
+
+  <!-- RESULT -->
+  <div id="sim-result" class="mt-6"></div>
+
+</div>
+
+<style>
+  .htmx-indicator          { display: none; }
+  .htmx-request            .htmx-indicator { display: inline-flex; align-items: center; }
+  .htmx-request.htmx-indicator             { display: inline-flex; align-items: center; }
+</style>
+
+<script>
+function sim() {
+  return {
+    rateType:      'variable',
+    financeAmount: 0,
+    propertyValue: 0,
+    termMonths:    0,
+    euribor:       0,
+    spread:        0,
+    fixedTan:      0,
+    fixedMonths:   0,
+
+    get ltv() {
+      if (!this.financeAmount || !this.propertyValue) return null;
+      return (this.financeAmount / this.propertyValue * 100).toFixed(1);
+    },
+
+    _pmt(P, annPct, n) {
+      if (!P || !n) return null;
+      if (annPct <= 0) return P / n;
+      const r = annPct / 100 / 12;
+      return P * r / (1 - Math.pow(1 + r, -n));
+    },
+
+    get monthlyPayment() {
+      const tan = this.rateType === 'fixed'
+        ? this.fixedTan
+        : this.euribor + this.spread;
+      return this._pmt(this.financeAmount, tan, this.termMonths);
+    },
+
+    get pmtPhase1() {
+      if (this.rateType !== 'mixed') return null;
+      return this._pmt(this.financeAmount, this.fixedTan, this.termMonths);
+    },
+
+    get pmtPhase2() {
+      if (this.rateType !== 'mixed' || !this.fixedMonths) return null;
+      const p1 = this.pmtPhase1;
+      if (!p1) return null;
+      const r1 = this.fixedTan / 100 / 12;
+      let bal = this.financeAmount;
+      for (let i = 0; i < this.fixedMonths; i++) {
+        bal -= (p1 - bal * r1);
+      }
+      const rem = this.termMonths - this.fixedMonths;
+      if (rem <= 0 || bal <= 0) return null;
+      return this._pmt(bal, this.euribor + this.spread, rem);
+    },
+
+    get totalInterest() {
+      if (this.rateType === 'mixed') {
+        const p1 = this.pmtPhase1, p2 = this.pmtPhase2;
+        if (!p1) return null;
+        return (p1 * this.fixedMonths) + ((p2 || 0) * (this.termMonths - this.fixedMonths)) - this.financeAmount;
+      }
+      const p = this.monthlyPayment;
+      return p ? p * this.termMonths - this.financeAmount : null;
+    },
+
+    get totalCost() {
+      if (this.rateType === 'mixed') {
+        const p1 = this.pmtPhase1, p2 = this.pmtPhase2;
+        if (!p1) return null;
+        return (p1 * this.fixedMonths) + ((p2 || 0) * (this.termMonths - this.fixedMonths));
+      }
+      const p = this.monthlyPayment;
+      return p ? p * this.termMonths : null;
+    },
+
+    get canPreview() {
+      if (!this.financeAmount || !this.termMonths) return false;
+      if (this.rateType === 'fixed')    return !!this.fixedTan;
+      if (this.rateType === 'variable') return true;
+      if (this.rateType === 'mixed')    return !!this.fixedTan && !!this.fixedMonths;
+      return false;
+    },
+
+    fmtEur(v) {
+      if (v === null || isNaN(v)) return '—';
+      return '€ ' + v.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+    },
+
+    fmtPct(v) {
+      if (v === null || isNaN(v)) return '—';
+      return v.toFixed(3) + '%';
+    },
+  };
+}
+</script>
+{% endblock %}
