@@ -86,7 +86,7 @@ async def generate_simulation(request: Request):
         sched = build_mixed_schedule(finance_amount, fixed_tan, fixed_months,
                                      euribor + spread, term_months)
 
-    summ = schedule_summary(sched)
+    summ = schedule_summary(sched, principal=finance_amount)
 
     sim_data = {
         "client_name":    client["folder_name"],

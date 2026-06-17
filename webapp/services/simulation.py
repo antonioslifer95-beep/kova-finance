@@ -1,4 +1,4 @@
-"""Mortgage simulation: amortization calculations + PDF generation."""
+﻿"""Mortgage simulation: amortization calculations + PDF generation."""
 from __future__ import annotations
 from datetime import date
 from pathlib import Path
@@ -73,14 +73,59 @@ def build_mixed_schedule(
     return rows
 
 
-def schedule_summary(rows: list[dict]) -> dict:
+def schedule_summary(rows: list[dict], principal: float = None) -> dict:
     total_paid     = sum(r["payment"] for r in rows)
     total_interest = sum(r["interest"] for r in rows)
+    total_capital  = principal if principal is not None else round(total_paid - total_interest, 2)
     return {
         "total_paid":     round(total_paid, 2),
         "total_interest": round(total_interest, 2),
-        "total_capital":  round(total_paid - total_interest, 2),
+        "total_capital":  total_capital,
     }
+
+
+def build_display_schedule(rows: list[dict], rate_type: str) -> list[dict]:
+    """Condense monthly schedule: first 12 of each phase monthly, rest annual.
+    For mixed: first 12 fixed monthly → fixed annual totals → first 12 variable monthly → variable annual totals.
+    """
+    def _monthly(phase_rows):
+        return [{
+            "label":     str(r["month"]),
+            "payment":   r["payment"],
+            "capital":   r["capital"],
+            "interest":  r["interest"],
+            "balance":   r["balance"],
+            "phase":     r.get("phase", 1),
+            "is_annual": False,
+        } for r in phase_rows[:12]]
+
+    def _annual(phase_rows, start_year, start_idx=12):
+        result, i, yr = [], start_idx, start_year
+        while i < len(phase_rows):
+            chunk = phase_rows[i:i+12]
+            result.append({
+                "label":     f"Ano {yr}",
+                "payment":   round(sum(r["payment"]  for r in chunk), 2),
+                "capital":   round(sum(r["capital"]  for r in chunk), 2),
+                "interest":  round(sum(r["interest"] for r in chunk), 2),
+                "balance":   chunk[-1]["balance"],
+                "phase":     chunk[0].get("phase", 1),
+                "is_annual": True,
+            })
+            i += 12
+            yr += 1
+        return result
+
+    if rate_type != "mixed":
+        return _monthly(rows) + _annual(rows, start_year=2)
+
+    p1 = [r for r in rows if r.get("phase") == 1]
+    p2 = [r for r in rows if r.get("phase") == 2]
+    p1_years = (len(p1) + 11) // 12
+    disp = _monthly(p1) + _annual(p1, start_year=2)
+    if p2:
+        disp += _monthly(p2) + _annual(p2, start_year=p1_years + 2)
+    return disp
 
 
 # ── PDF ───────────────────────────────────────────────────────────────────────
@@ -156,7 +201,9 @@ def generate_simulation_pdf(data: dict, schedule: list[dict], summary: dict, out
         if v is None:
             return "—"
         try:
-            return "€ {:,.2f}".format(float(v)).replace(",", " ")
+            s = "{:,.2f}".format(float(v))
+            int_part, dec_part = s.split(".")
+            return "€ " + int_part.replace(",", ".") + "," + dec_part
         except Exception:
             return str(v)
 
@@ -200,9 +247,10 @@ def generate_simulation_pdf(data: dict, schedule: list[dict], summary: dict, out
             c.roundRect(cx, card_y + card_h - 17, card_w, 17, 3, fill=1, stroke=0)
             c.rect(cx, card_y + card_h - 17, card_w, 8, fill=1, stroke=0)
             c.setFillColor(WHITE)
-            c.setFont("Helvetica-Bold", 8.5)
             label = p.get("name") or ("Fiador" if p.get("is_fiador") else f"Requerente {i+1}")
-            c.drawString(cx + 4 * mm, card_y + card_h - 12, label[:28])
+            name_sz = 8.5 if len(label) <= 30 else 7.5
+            c.setFont("Helvetica-Bold", name_sz)
+            c.drawString(cx + 4 * mm, card_y + card_h - 12, label[:45])
             # Fields
             fx, fy = cx + 4 * mm, card_y + card_h - 32
             _cell(fx, fy, "Rendimento Mensal Médio", _eur(p.get("income")), 6.5, 8.5)
@@ -264,6 +312,8 @@ def generate_simulation_pdf(data: dict, schedule: list[dict], summary: dict, out
     pmt_phase1 = schedule[0]["payment"] if schedule else None
     pmt_phase2 = next((r["payment"] for r in schedule if r.get("phase") == 2), None)
 
+    is_transfer = (data.get("operation_type") == "Transferência de Crédito")
+
     if rate_type == "variable":
         idx = f"EURIBOR {data.get('euribor_period','6M')}"
         tan = (float(data.get("euribor") or 0) + float(data.get("spread") or 0))
@@ -274,8 +324,9 @@ def generate_simulation_pdf(data: dict, schedule: list[dict], summary: dict, out
         _cell(LM + col3 + 5*mm, r2y, "Prestação Mensal", _eur(pmt_phase1), 6.5, 8.5)
         if total_income and pmt_phase1:
             try:
+                base = 0 if is_transfer else total_crc
                 _cell(LM + 2*col3 + 5*mm, r2y, "Taxa Esforço c/ Prestação",
-                      f"{(total_crc + pmt_phase1)/total_income*100:.1f}%", 6.5, 8.5)
+                      f"{(base + pmt_phase1)/total_income*100:.1f}%", 6.5, 8.5)
             except Exception:
                 pass
 
@@ -285,8 +336,9 @@ def generate_simulation_pdf(data: dict, schedule: list[dict], summary: dict, out
         _cell(LM + 5*mm, r2y, "Prestação Mensal", _eur(pmt_phase1), 6.5, 8.5)
         if total_income and pmt_phase1:
             try:
+                base = 0 if is_transfer else total_crc
                 _cell(LM + col3 + 5*mm, r2y, "Taxa Esforço c/ Prestação",
-                      f"{(total_crc + pmt_phase1)/total_income*100:.1f}%", 6.5, 8.5)
+                      f"{(base + pmt_phase1)/total_income*100:.1f}%", 6.5, 8.5)
             except Exception:
                 pass
 
@@ -301,8 +353,9 @@ def generate_simulation_pdf(data: dict, schedule: list[dict], summary: dict, out
         _cell(LM + col3 + 5*mm, r2y, "Prestação Fase 2", _eur(pmt_phase2), 6.5, 8.5)
         if total_income and pmt_phase1:
             try:
+                base = 0 if is_transfer else total_crc
                 _cell(LM + 2*col3 + 5*mm, r2y, "Taxa Esforço c/ Fase 1",
-                      f"{(total_crc + pmt_phase1)/total_income*100:.1f}%", 6.5, 8.5)
+                      f"{(base + pmt_phase1)/total_income*100:.1f}%", 6.5, 8.5)
             except Exception:
                 pass
 
@@ -324,12 +377,15 @@ def generate_simulation_pdf(data: dict, schedule: list[dict], summary: dict, out
     # ── Amortization table ────────────────────────────────────────────────────
     y = _section("TABELA DE AMORTIZAÇÃO", y, 65)
 
-    COLS   = [32, 90, 84, 80, 92]   # Mês | Prestação | Capital | Juros | Capital em Dívida
-    TW     = sum(COLS)
-    TX     = LM + (CW - TW) / 2
-    ROW_H  = 10
-    TH_H   = 15                      # table header row height
-    SAFE_Y = FOOT_Y + 8              # don't draw rows below this
+    COLS      = [32, 90, 84, 80, 92]
+    TW        = sum(COLS)
+    TX        = LM + (CW - TW) / 2
+    ROW_H     = 10    # monthly row height
+    ANN_H     = 14    # annual row height
+    TH_H      = 15
+    SAFE_Y    = FOOT_Y + 8
+    PHASE2ANN = colors.HexColor("#c3d9f8")
+    ANN_BG    = colors.HexColor("#dde3ea")
 
     def _tbl_header(top_y):
         c.setFillColor(NAVY)
@@ -337,55 +393,60 @@ def generate_simulation_pdf(data: dict, schedule: list[dict], summary: dict, out
         c.setFillColor(WHITE)
         c.setFont("Helvetica-Bold", 6.5)
         cx = TX
-        for lbl, w in zip(["MÊS", "PRESTAÇÃO", "CAPITAL AMORTIZADO", "JUROS", "CAPITAL EM DÍVIDA"], COLS):
+        for lbl, w in zip(["PERIODO", "PRESTACAO", "CAPITAL AMORTIZADO", "JUROS", "CAPITAL EM DIVIDA"], COLS):  # ASCII-only to avoid encoding issues
             c.drawCentredString(cx + w / 2, top_y - TH_H + 4, lbl)
             cx += w
-        return top_y - TH_H   # returns the y of the bottom of the header row
+        return top_y - TH_H
 
-    def _tbl_row(row_dict, row_top, shade):
-        ph = row_dict.get("phase", 1)
-        bg = PHASE2 if ph == 2 else (LIGHT if shade else WHITE)
+    def _tbl_row(disp, row_top, shade):
+        is_ann = disp.get("is_annual", False)
+        ph     = disp.get("phase", 1)
+        rh     = ANN_H if is_ann else ROW_H
+        if is_ann:
+            bg = PHASE2ANN if ph == 2 else ANN_BG
+        elif ph == 2:
+            bg = PHASE2
+        else:
+            bg = LIGHT if shade else WHITE
         c.setFillColor(bg)
-        c.rect(TX, row_top - ROW_H, TW, ROW_H, fill=1, stroke=0)
+        c.rect(TX, row_top - rh, TW, rh, fill=1, stroke=0)
         c.setStrokeColor(colors.HexColor("#dde3ea"))
         c.setLineWidth(0.15)
         c.line(TX, row_top, TX + TW, row_top)
         c.setFillColor(VALUE_C)
-        c.setFont("Helvetica", 6.5)
+        c.setFont("Helvetica-Bold" if is_ann else "Helvetica", 6.5)
+        ty = row_top - rh + (rh - 6.5) / 2
         cx = TX
         for val, w in zip([
-            str(row_dict["month"]),
-            _eur(row_dict["payment"]),
-            _eur(row_dict["capital"]),
-            _eur(row_dict["interest"]),
-            _eur(row_dict["balance"]),
+            disp["label"],
+            _eur(disp["payment"]),
+            _eur(disp["capital"]),
+            _eur(disp["interest"]),
+            _eur(disp["balance"]),
         ], COLS):
-            c.drawCentredString(cx + w / 2, row_top - ROW_H + 2.5, val)
+            c.drawCentredString(cx + w / 2, ty, val)
             cx += w
+        return rh
 
-    # Draw table header; track where current table block started (for outer rect)
+    display_rows = build_display_schedule(schedule, rate_type)
     cur_y     = _tbl_header(y)
-    block_top = y    # top of the current table block (for border rect)
+    block_top = y
 
-    for i, row in enumerate(schedule):
-        if cur_y - ROW_H < SAFE_Y:
-            # Close current block
+    for i, disp in enumerate(display_rows):
+        rh = ANN_H if disp.get("is_annual") else ROW_H
+        if cur_y - rh < SAFE_Y:
             c.setStrokeColor(BORDER)
             c.setLineWidth(0.5)
             c.rect(TX, cur_y, TW, block_top - cur_y, stroke=1, fill=0)
-            # New page
             c.showPage()
             page += 1
             _header(page)
             _footer(page)
-            new_top = H - HDR_H - 10 * mm
+            new_top   = H - HDR_H - 10 * mm
             cur_y     = _tbl_header(new_top)
             block_top = new_top
+        cur_y -= _tbl_row(disp, cur_y, i % 2 == 0)
 
-        _tbl_row(row, cur_y, i % 2 == 0)
-        cur_y -= ROW_H
-
-    # Close last block
     c.setStrokeColor(BORDER)
     c.setLineWidth(0.5)
     c.rect(TX, cur_y, TW, block_top - cur_y, stroke=1, fill=0)
