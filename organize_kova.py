@@ -74,7 +74,7 @@ STANDARD_FOLDERS = [
 DISSOLVE_FOLDERS = {"documentos processados", "hpp"}
 
 # Words that mark a subfolder as temporary/working (to be dissolved)
-_DISSOLVE_WORDS = {"processados", "processadas", "verificar", "hpp"}
+_DISSOLVE_WORDS = {"processados", "processadas", "verificar", "hpp", "dossier"}
 
 
 def _is_dissolve_folder(name: str) -> bool:
@@ -447,6 +447,8 @@ NORMALIZED_RULES: Dict[str, List[str]] = {
     "Proposta Crédito": [
         r"^proposta", r"^simulacao",
         r"^(1|2|3)(o|a|o|a)\s+proponente",
+        r"\bsimulac",           # catches "simulacao" anywhere in the name
+        r"seguro.?(de.?)?vida", # life insurance simulation
     ],
 }
 
@@ -483,6 +485,7 @@ VISION_PROMPT = (
     "- Mapa CRC (Banco de Portugal credit responsibility map)\n"
     "- RGPD (data protection / GDPR consent form with signature)\n"
     "- Proposta Crédito (credit proposal, bank simulation, mortgage application form, "
+    "life insurance simulation / seguro de vida simulation, "
     "borrower declaration, solvency assessment)\n\n"
     "Reply with ONLY the category name, nothing else."
 )
@@ -706,10 +709,10 @@ def find_inplace_image_merges(client_folder: Path, subclients: List[Path] = None
 
 
 # Categories that belong to one person — AI can decide which.
-# Imóvel and Proposta Crédito are typically shared, so left at root.
+# Imóvel, Proposta Crédito and RGPD are always shared, so left at client root.
 _PERSONAL_CATEGORIES = {
     "Documentos Pessoais", "Rendimentos", "Extratos Bancários",
-    "IRS", "Mapa CRC", "RGPD",
+    "IRS", "Mapa CRC",
 }
 
 
@@ -791,6 +794,8 @@ def find_misrouted_files(
     person_names = [sc.name for sc in subclients]
 
     for std in STANDARD_FOLDERS:
+        if std == "RGPD":  # RGPD is always shared — never re-route to a sub-client
+            continue
         std_folder = client_folder / std
         if not std_folder.exists():
             continue
@@ -886,6 +891,8 @@ def scan_client(
 
     for subclient in all_subclients:
         for std in STANDARD_FOLDERS:
+            if std == "RGPD":  # shared — only one RGPD folder at client root
+                continue
             target = subclient / std
             if not target.exists():
                 plan["new_folders"].append(str(target))
@@ -931,6 +938,10 @@ def scan_client(
                 "target_base": str(base_folder),
             })
             continue
+
+        # RGPD is always shared at the client root, never per-person
+        if category == "RGPD" and base_folder != client_folder:
+            base_folder = client_folder
 
         target = base_folder / category / file_path.name
         if target.resolve() != file_path.resolve():
