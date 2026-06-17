@@ -1,4 +1,25 @@
-<div class="bg-gray-900 border border-green-800/40 rounded-xl p-5">
+<div class="bg-gray-900 border border-green-800/40 rounded-xl p-5"
+     {% if is_test %}
+     x-data="{
+       async share() {
+         const url = '/simulation/download?client_id=0&filename={{ filename }}';
+         try {
+           const resp = await fetch(url);
+           const blob = await resp.blob();
+           const file = new File([blob], '{{ filename }}', { type: 'application/pdf' });
+           if (navigator.canShare && navigator.canShare({ files: [file] })) {
+             await navigator.share({ title: 'Simulação Kova Finance', files: [file] });
+           } else if (navigator.share) {
+             await navigator.share({ title: 'Simulação Kova Finance', url: window.location.origin + url });
+           } else {
+             window.open(url, '_blank');
+           }
+         } catch(e) {
+           window.open(url, '_blank');
+         }
+       }
+     }"
+     {% endif %}>
   <div class="flex items-center gap-3 mb-5">
     <div class="w-9 h-9 bg-green-900/40 rounded-full flex items-center justify-center flex-shrink-0">
       <svg class="w-5 h-5 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -7,7 +28,11 @@
     </div>
     <div>
       <p class="text-sm font-semibold text-gray-100">Simulação gerada com sucesso</p>
+      {% if is_test %}
+      <p class="text-xs text-gray-500 mt-0.5">Simulacoes Teste / {{ filename }}</p>
+      {% else %}
       <p class="text-xs text-gray-500 mt-0.5">Guardado em Proposta Crédito / {{ filename }}</p>
+      {% endif %}
     </div>
   </div>
 
@@ -37,10 +62,22 @@
       </svg>
       Descarregar PDF
     </a>
+    {% if is_test %}
+    <button @click="share()"
+            class="flex items-center gap-2 bg-gray-700 hover:bg-gray-600
+                   text-gray-200 px-4 py-2 rounded-lg text-sm font-medium transition-colors">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z"/>
+      </svg>
+      Partilhar
+    </button>
+    {% else %}
     <a href="/clients/{{ client.id }}"
        class="flex items-center gap-2 bg-gray-700 hover:bg-gray-600
               text-gray-200 px-4 py-2 rounded-lg text-sm font-medium transition-colors">
       Ver cliente
     </a>
+    {% endif %}
   </div>
 </div>

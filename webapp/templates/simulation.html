@@ -27,6 +27,7 @@
                 hx-trigger="change"
                 hx-indicator="#client-spinner">
           <option value="">— Selecionar cliente —</option>
+          <option value="0">Potencial Cliente / Teste</option>
           {% for c in clients %}
           <option value="{{ c.id }}">{{ c.folder_name }}</option>
           {% endfor %}
