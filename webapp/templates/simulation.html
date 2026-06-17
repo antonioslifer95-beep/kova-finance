@@ -197,25 +197,19 @@
                x-text="ltv !== null ? ltv + '%' : '—'"></p>
           </div>
           <!-- Variable / Fixed: one payment -->
-          <template x-if="rateType !== 'mixed'">
-            <div>
-              <p class="text-xs text-gray-500 mb-1">Prestação mensal</p>
-              <p class="text-xl font-bold text-indigo-300" x-text="fmtEur(monthlyPayment)"></p>
-            </div>
-          </template>
-          <!-- Mixed: two payments -->
-          <template x-if="rateType === 'mixed'">
-            <div>
-              <p class="text-xs text-gray-500 mb-1">Prestação fase 1</p>
-              <p class="text-xl font-bold text-indigo-300" x-text="fmtEur(pmtPhase1)"></p>
-            </div>
-          </template>
-          <template x-if="rateType === 'mixed'">
-            <div>
-              <p class="text-xs text-gray-500 mb-1">Prestação fase 2</p>
-              <p class="text-xl font-bold text-indigo-300" x-text="fmtEur(pmtPhase2)"></p>
-            </div>
-          </template>
+          <div x-show="rateType !== 'mixed'">
+            <p class="text-xs text-gray-500 mb-1">Prestação mensal</p>
+            <p class="text-xl font-bold text-indigo-300" x-text="fmtEur(monthlyPayment)"></p>
+          </div>
+          <!-- Mixed: two payments (x-show keeps elements in DOM so Alpine tracks pmtPhase2 reactively) -->
+          <div x-show="rateType === 'mixed'">
+            <p class="text-xs text-gray-500 mb-1">Prestação fase 1</p>
+            <p class="text-xl font-bold text-indigo-300" x-text="fmtEur(pmtPhase1)"></p>
+          </div>
+          <div x-show="rateType === 'mixed'">
+            <p class="text-xs text-gray-500 mb-1">Prestação fase 2</p>
+            <p class="text-xl font-bold text-indigo-300" x-text="fmtEur(pmtPhase2)"></p>
+          </div>
           <div>
             <p class="text-xs text-gray-500 mb-1">Total de juros</p>
             <p class="text-xl font-bold text-amber-300" x-text="fmtEur(totalInterest)"></p>
