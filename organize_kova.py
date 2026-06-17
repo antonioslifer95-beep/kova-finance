@@ -74,7 +74,10 @@ STANDARD_FOLDERS = [
 DISSOLVE_FOLDERS = {"documentos processados", "hpp"}
 
 # Words that mark a subfolder as temporary/working (to be dissolved)
-_DISSOLVE_WORDS = {"processados", "processadas", "verificar", "hpp", "dossier"}
+_DISSOLVE_WORDS = {"processados", "processadas", "verificar", "hpp"}
+
+# Subfolders that are part of every mortgage application but must never be touched
+SKIP_SUBFOLDER_NAMES = {"dossier e folha de rosto"}
 
 
 def _is_dissolve_folder(name: str) -> bool:
@@ -172,6 +175,7 @@ def _get_subclient_folders(client_folder: Path) -> List[Path]:
         item for item in client_folder.iterdir()
         if item.is_dir()
         and item.name.lower() not in standard_lower
+        and item.name.lower() not in SKIP_SUBFOLDER_NAMES
         and not _is_dissolve_folder(item.name)
         and _subclient_has_content(item)
     ]
@@ -226,6 +230,7 @@ CATEGORY_RULES: Dict[str, List[str]] = {
         r"^Proposta", r"^Simulacao_", r"^FormularioCredHab_",
         r"^Formulario", r"^DeclaracaoMutuarios", r"^CompCapitaisProrios",
         r"^DossierCredito_", r"^AvaliacaoSolv", r"^CertificadoConclusao",
+        r"^Simulacao_SeguroVida", r"^Simulacao_Multirriscos",
     ],
     "Documentos Pessoais": [
         r"^CC_", r"^NIF_", r"^Passaporte_", r"^CartaoCidadao_",
@@ -299,9 +304,16 @@ Imóvel:
 
 Proposta Crédito:
   credit proposal               →  Proposta_BankName_YYYY-MM
-  simulation                    →  Simulacao_BankName_YYYY-MM
+  mortgage simulation           →  Simulacao_BankName_YYYY-MM
+  life insurance simulation     →  Simulacao_SeguroVida_BankName
+  multi-risk insurance sim      →  Simulacao_Multirriscos_BankName
   bank form                     →  FormularioBanco_BankName
   borrower declaration          →  DeclaracaoMutuarios
+
+  To distinguish simulations: look for words like "seguro de vida", "vida",
+  "morte", "invalidez" (→ SeguroVida) or "multirriscos", "habitação", "incêndio"
+  (→ Multirriscos). If neither, it is a mortgage simulation → use BankName only.
+  BankName examples: BPI BCP CGD Santander NovoBanco ActivoBank Montepio Caixa
 
 Rules:
 - Use _ to separate parts. No spaces. No special chars except - for dates.
@@ -633,6 +645,8 @@ def get_files_to_organize(client_folder: Path) -> List[Tuple[Path, Path]]:
             continue
         if item.name.lower() in standard_lower:
             continue  # already organised
+        if item.name.lower() in SKIP_SUBFOLDER_NAMES:
+            continue  # fixed mortgage-application folder — never touch
 
         if _is_dissolve_folder(item.name):
             # Redistribute into client root
