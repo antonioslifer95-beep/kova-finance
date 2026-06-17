@@ -170,11 +170,15 @@
                           text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
                    placeholder="ex: 60"/>
           </div>
-          <!-- Mixed: show variable TAN summary -->
-          <div x-show="rateType === 'mixed'" class="flex items-end pb-2">
+          <!-- Mixed: show variable TAN + phase 2 payment -->
+          <div x-show="rateType === 'mixed'" class="flex flex-col justify-end pb-2 gap-1">
             <p class="text-xs text-gray-400">
               TAN variável:
               <span class="text-indigo-300 font-semibold" x-text="fmtPct(euribor + spread)"></span>
+            </p>
+            <p class="text-xs text-gray-400" x-show="pmtPhase2">
+              Prestação fase 2:
+              <span class="text-indigo-300 font-semibold" x-text="fmtEur(pmtPhase2)"></span>
             </p>
           </div>
         </div>
@@ -299,8 +303,9 @@ function sim() {
       const r1 = this.fixedTan / 100 / 12;
       let bal = this.financeAmount;
       for (let i = 0; i < this.fixedMonths; i++) {
-        bal -= (p1 - bal * r1);
+        bal = bal * (1 + r1) - p1;
       }
+      bal = Math.max(0, bal);
       const rem = this.termMonths - this.fixedMonths;
       if (rem <= 0 || bal <= 0) return null;
       return this._pmt(bal, this.euribor + this.spread, rem);
