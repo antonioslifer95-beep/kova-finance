@@ -125,18 +125,32 @@ async def generate_simulation(request: Request):
         folder = Path(client["folder_path"]) / "Proposta Crédito"
     folder.mkdir(exist_ok=True)
 
-    slug_map = {
-        "Aquisição": "Aquisicao",
-        "Refinanciamento": "Refinanciamento",
-        "Transferência de Crédito": "Transferencia",
-    }
-    op_slug  = slug_map.get(operation_type, "Simulacao")
-    today    = date.today().strftime("%Y-%m")
-    filename = f"Simulacao_{op_slug}_{today}.pdf"
+    today = date.today().strftime("%Y-%m")
+
+    if is_test:
+        rate_slug_map = {"variable": "Variavel", "fixed": "Fixa", "mixed": "Mista"}
+        rate_slug = rate_slug_map.get(rate_type, rate_type)
+        raw_name  = (persons[0]["name"].strip() if persons and persons[0]["name"] else "Potencial")
+        # strip accents and keep only word chars
+        import unicodedata
+        name_slug = unicodedata.normalize("NFD", raw_name)
+        name_slug = "".join(c for c in name_slug if unicodedata.category(c) != "Mn")
+        name_slug = re.sub(r"[^\w]", "_", name_slug).strip("_")
+        name_slug = re.sub(r"_+", "_", name_slug)[:30]
+        base_name = f"Simulacao_{name_slug}_{rate_slug}"
+    else:
+        slug_map = {
+            "Aquisição": "Aquisicao",
+            "Refinanciamento": "Refinanciamento",
+            "Transferência de Crédito": "Transferencia",
+        }
+        base_name = f"Simulacao_{slug_map.get(operation_type, 'Simulacao')}"
+
+    filename = f"{base_name}_{today}.pdf"
     out_path = folder / filename
     v = 2
     while out_path.exists():
-        out_path = folder / f"Simulacao_{op_slug}_{today}_v{v}.pdf"
+        out_path = folder / f"{base_name}_{today}_v{v}.pdf"
         v += 1
 
     generate_simulation_pdf(sim_data, sched, summ, str(out_path))
