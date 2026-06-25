@@ -7,7 +7,7 @@ from config import BASE_DIR
 
 _runs: dict[int, queue.Queue] = {}
 
-def start_run(client_name: str = None) -> int:
+def start_run(client_name: str = None, new_only: bool = False) -> int:
     with get_db() as db:
         cur = db.execute(
             "INSERT INTO organizer_runs(client_scope) VALUES(?)", (client_name,)
@@ -24,6 +24,8 @@ def start_run(client_name: str = None) -> int:
         cmd = [sys.executable, str(script), "--apply"]
         if client_name:
             cmd += ["--client", client_name]
+        if new_only:
+            cmd += ["--new-only"]
         log_lines = []
         try:
             proc = subprocess.Popen(

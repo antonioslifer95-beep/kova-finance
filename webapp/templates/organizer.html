@@ -4,13 +4,13 @@
 {% block mob_organizer %}active{% endblock %}
 
 {% block content %}
-<div x-data="{ runId: null, running: false }">
+<div x-data="{ runId: null, running: false, showModeModal: false }">
   <div class="flex items-center justify-between mb-6">
     <div>
       <h1 class="text-xl font-semibold">Document Organizer</h1>
       <p class="text-gray-500 text-sm mt-0.5">Auto-moves files into the correct subfolders</p>
     </div>
-    <form @submit.prevent="startRun()" class="flex items-center gap-3">
+    <form @submit.prevent="showModeModal = true" class="flex items-center gap-3">
       <select name="client" id="client-select"
               class="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-300
                      focus:outline-none focus:ring-2 focus:ring-indigo-500">
@@ -30,6 +30,33 @@
         <span x-text="running ? 'Running…' : 'Run Organizer'"></span>
       </button>
     </form>
+  </div>
+
+  <!-- Mode choice modal -->
+  <div x-show="showModeModal" x-cloak
+       class="fixed inset-0 bg-black/60 flex items-center justify-center z-50 px-4"
+       @keydown.escape.window="showModeModal = false">
+    <div class="bg-gray-900 border border-gray-800 rounded-xl p-5 max-w-sm w-full" @click.outside="showModeModal = false">
+      <h3 class="text-sm font-medium text-gray-200 mb-1">How should this run organize files?</h3>
+      <p class="text-xs text-gray-500 mb-4">
+        Choose "Only new files" if you just dropped in a few new documents and don't want
+        already-filed ones re-scanned or re-renamed.
+      </p>
+      <div class="flex flex-col gap-2">
+        <button type="button" @click="showModeModal = false; startRun('new_only')"
+                class="text-left px-3 py-2.5 rounded-lg bg-gray-800 hover:bg-gray-700 border border-gray-700">
+          <span class="block text-sm font-medium text-gray-200">Only new files</span>
+          <span class="block text-xs text-gray-500">Faster — categorizes and files newly added documents only</span>
+        </button>
+        <button type="button" @click="showModeModal = false; startRun('full')"
+                class="text-left px-3 py-2.5 rounded-lg bg-gray-800 hover:bg-gray-700 border border-gray-700">
+          <span class="block text-sm font-medium text-gray-200">Entire application</span>
+          <span class="block text-xs text-gray-500">Re-checks every already-organized file too</span>
+        </button>
+      </div>
+      <button type="button" @click="showModeModal = false"
+              class="mt-4 text-xs text-gray-500 hover:text-gray-300">Cancel</button>
+    </div>
   </div>
 
   <!-- Live log -->
@@ -94,12 +121,13 @@
 </div>
 
 <script>
-async function startRun() {
+async function startRun(mode) {
   const comp = Alpine.$data(document.querySelector('[x-data]'));
   comp.running = true;
   const client = document.getElementById('client-select').value;
   const fd = new FormData();
   if (client) fd.append('client', client);
+  fd.append('mode', mode);
   const resp = await fetch('/organizer/run', { method: 'POST', body: fd });
   const html = await resp.text();
   // Extract run_id from SSE URL in returned HTML

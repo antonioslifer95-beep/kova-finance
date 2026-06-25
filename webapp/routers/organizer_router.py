@@ -29,7 +29,8 @@ async def run_organizer(request: Request):
     current_user(request)
     form = await request.form()
     client_name = form.get("client") or None
-    run_id = organizer_runner.start_run(client_name)
+    new_only = form.get("mode") == "new_only"
+    run_id = organizer_runner.start_run(client_name, new_only=new_only)
     # Return HTMX partial that opens the SSE stream
     return HTMLResponse(
         f'<div id="log-box" class="font-mono text-xs text-green-400 bg-gray-900 rounded p-3 h-64 overflow-y-auto"'
