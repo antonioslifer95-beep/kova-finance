@@ -268,8 +268,8 @@ def answer_stream(query: str, client_id: int = None, history: list = None):
 
     try:
         with client.messages.stream(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=1024,
+            model="claude-sonnet-4-6",
+            max_tokens=2048,
             system=SYSTEM_PROMPT,
             messages=messages,
         ) as stream:
