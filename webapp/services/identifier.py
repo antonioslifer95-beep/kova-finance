@@ -12,23 +12,29 @@ IMAGE_EXTS    = {".jpg", ".jpeg", ".png"}
 DOC_EXTS      = {".pdf"} | IMAGE_EXTS
 
 # Personal categories where files get a person suffix — shared ones (Imóvel, Proposta) don't
-_PERSONAL_CATS = {"Documentos Pessoais", "Rendimentos", "Extratos Bancários", "IRS", "Mapa CRC", "RGPD"}
+_PERSONAL_CATS = {"Documentos Pessoais", "Rendimentos", "Extratos Bancários", "Património", "IRS", "Mapa CRC", "RGPD"}
 
 # Known bank/institution tokens that appear in filenames but are NOT person names
 _KNOWN_NON_PERSON = {
     "BCP", "BPI", "CGD", "Santander", "NovoBanco", "Revolut", "Wise",
     "ActivoBank", "Montepio", "Itau", "Millennium", "Bankinter",
-    "CA", "CRC", "BP", "AL", "SS",
+    "CA", "CRC", "BP", "AL", "SS", "IGCP", "InteractiveBrokers",
 }
 
 CATEGORIZE_AND_NAME_PROMPT = """\
 This is a document from a Portuguese mortgage application dossier.
 Provide exactly two lines:
-Category: <one of: Documentos Pessoais, Rendimentos, Extratos Bancários, IRS, Imóvel, Mapa CRC, RGPD, Proposta Crédito>
+Category: <one of: Documentos Pessoais, Rendimentos, Extratos Bancários, Património, IRS, Imóvel, Mapa CRC, RGPD, Proposta Crédito>
 Filename: <standardized stem — use these conventions>
 
-Rendimentos:    payslip → RecVenc_YYYY-MM_FirstName  |  employer declaration → DeclPatronal_FirstName
-Extratos:       bank statement → Extrato_YYYY-MM_BankName_FirstName  (omit FirstName if joint/unclear)
+Rendimentos:    payslip (incl. "Boletim de Vencimentos") → RecVenc_YYYY-MM_FirstName  |  employer declaration → DeclPatronal_FirstName
+                freelance invoice-receipt (recibo verde / fatura-recibo) → FaturaRecibo_YYYY-MM_FirstName
+                rent receipt (recibo de renda) → ReciboRenda_YYYY-MM_FirstName
+                avença / nota discriminativa dos atos clínicos (contrato de avença) → ReciboAvenca_YYYY-MM_FirstName
+Extratos:       CURRENT/CHECKING account statement ONLY → Extrato_YYYY-MM_BankName_FirstName  (omit FirstName if joint/unclear)
+Património:     savings/term-deposit account → ContaPoupanca_YYYY-MM_BankName_FirstName
+                treasury bonds/certificates (IGCP) → CertificadoTesouro_YYYY-MM_FirstName
+                investment/brokerage statement → CarteiraInvestimento_YYYY-MM_BankName_FirstName
 IRS:            tax return → IRS_YYYY_FirstName  |  liquidation note → NotaLiq_IRS_YYYY_FirstName
 Documentos:     CC/BI → CC_FirstName  |  passport → Passaporte_FirstName  |  residence permit → TituloResidencia_FirstName
                 address proof → CompMorada_FirstName  |  IBAN proof → CompIBAN_BankName_FirstName
@@ -306,14 +312,16 @@ def _run_identification(folder_name: str, q: queue.Queue):
         q.put("ERROR: 'anthropic' package not installed.")
         return
 
-    # Pick up to 6 files — prefer PDFs, then images
-    files = sorted(
+    # Prefer PDFs, then images. We scan beyond just the first handful of files —
+    # a mortgage application can have many documents split across 2+ applicants,
+    # and a small fixed sample can land entirely on one person's files.
+    all_files = sorted(
         [f for f in folder_path.iterdir()
          if f.is_file() and f.suffix.lower() in DOC_EXTS],
         key=lambda f: (0 if f.suffix.lower() == ".pdf" else 1, f.name)
-    )[:6]
+    )
 
-    if not files:
+    if not all_files:
         q.put("No documents found.")
         with get_db() as db:
             db.execute(
@@ -321,13 +329,18 @@ def _run_identification(folder_name: str, q: queue.Queue):
             )
         return
 
-    q.put(f"Found {len(files)} document(s). Categorising and renaming each...")
+    MAX_FILES = 20      # hard cap on AI calls per identification run
+    STALE_LIMIT = 8     # stop early after this many personal docs in a row reveal no new person
+
+    q.put(f"Found {len(all_files)} document(s). Categorising and renaming each...")
 
     # Rename-first approach: get a standardised filename with the person's first name
     # embedded, then extract names from the filenames — much more reliable than
     # trying to parse CC fields directly.
-    names_found = []
-    for f in files:
+    names_found: list[str] = []
+    known_firsts: set[str] = set()
+    stale = 0
+    for f in all_files[:MAX_FILES]:
         b64, mt = _render_first_page(f)
         if not b64:
             continue
@@ -360,11 +373,23 @@ def _run_identification(folder_name: str, q: queue.Queue):
             person = _person_from_stem(stem)
             if person:
                 q.put(f"  → {stem}  →  {person}")
+                first = _norm(person).split()[0] if person.strip() else ""
+                if first and first in known_firsts:
+                    stale += 1
+                else:
+                    stale = 0
+                    if first:
+                        known_firsts.add(first)
                 names_found.append(person)
             else:
                 q.put(f"  → {stem} ({category}, no name)")
+                stale += 1
         except Exception as e:
             q.put(f"  [error] {e}")
+
+        if names_found and stale >= STALE_LIMIT:
+            q.put(f"  No new names in the last {STALE_LIMIT} personal documents — stopping scan.")
+            break
 
     unique_names = _deduplicate_names(names_found)
 
@@ -372,8 +397,8 @@ def _run_identification(folder_name: str, q: queue.Queue):
         q.put("Could not determine names — please type the client name manually.")
         with get_db() as db:
             db.execute(
-                "UPDATE pending_clients SET status='conflict', detected_name='', "
-                "conflict_with='', updated_at=datetime('now') WHERE folder_name=?",
+                "UPDATE pending_clients SET status='review', detected_name='', "
+                "conflict_with=NULL, updated_at=datetime('now') WHERE folder_name=?",
                 (folder_name,)
             )
         return
@@ -392,7 +417,13 @@ def _run_identification(folder_name: str, q: queue.Queue):
             )
         return
 
-    _apply_identification(folder_name, detected_name, q)
+    q.put("Please confirm the detected name(s) above.")
+    with get_db() as db:
+        db.execute(
+            "UPDATE pending_clients SET status='review', detected_name=?, "
+            "conflict_with=NULL, updated_at=datetime('now') WHERE folder_name=?",
+            (detected_name, folder_name)
+        )
 
 
 def _apply_identification(folder_name: str, confirmed_name: str, q: queue.Queue):
