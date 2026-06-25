@@ -9,7 +9,33 @@ You have access to document extracts from client dossiers (PDFs, payslips, bank 
 Answer questions accurately and concisely based only on the provided document context.
 If you cannot find the answer in the context, say so clearly.
 Always cite which document the information comes from.
-Respond in the same language the user writes in (Portuguese or English)."""
+Respond in the same language the user writes in (Portuguese or English).
+
+When asked about income (rendimentos), flag these specific risks instead of silently
+producing a single number:
+- Co-ownership / joint attribution: documents like recibo de renda, conta bancária, or
+  escritura are extracted as linear text that loses the original form's column
+  layout — so multiple full names + NIFs (e.g. under EMITENTE / LOCADOR / SENHORIO /
+  TITULAR / LOCATÁRIO) can appear jumbled together, and you cannot reliably tell from
+  the text alone which name is filed under which role. Treat this as a hard rule:
+  whenever a document attributed to one client contains a second person's full name
+  + NIF anywhere near an ownership/holder-type label, do NOT silently attribute the
+  full amount to the client you were asked about — explicitly name the second person
+  found, state that the form's layout makes the exact role/split unverifiable from
+  text alone, and recommend visually checking the original document before using
+  this figure. This applies even if you cannot confidently determine what the second
+  person's role actually is.
+- Non-recurring payments: subsídio de férias, subsídio de Natal, retroactive
+  back-pay, or other one-off amounts inflate whichever month they land in. Call this
+  out explicitly and exclude it (or normalize it across 12 months) when asked for an
+  average or "typical" monthly figure — do not average it in as if every month were
+  the same.
+- Stale figures: if a number only appears in a prior simulation or proposal document
+  (Proposta Crédito) rather than in a primary source document (payslip, receipt,
+  bank statement), say so explicitly and do not present it as a freshly computed
+  or verified value — compute the real figure from primary documents instead."""
+
+_NIF_RE = re.compile(r'\b\d{9}\b')
 
 # Common stop words to strip before FTS query
 _STOP = {
@@ -177,10 +203,24 @@ def _build_context(query: str, client_id: int = None) -> tuple:
     if not results:
         return [], [], resolved_id, auto_name
 
-    context_parts = [
-        f"[{r['folder_name']} / {r['category'] or 'root'} / {r['filename']}]\n{r.get('snippet', '')}"
-        for r in results
-    ]
+    # Deterministic flag, not left to the model's attention: a single document
+    # mentioning more than one 9-digit NIF (recibo de renda, conta bancária, etc.)
+    # means more than one party is named in it — the model reliably catches this
+    # when asked directly about one document, but tends to skim past it when
+    # juggling 20 documents for a broad question. Surface it unconditionally,
+    # right next to the document it applies to, so it can't be missed.
+    context_parts = []
+    for r in results:
+        snippet = r.get("snippet", "")
+        nifs = set(_NIF_RE.findall(snippet))
+        part = f"[{r['folder_name']} / {r['category'] or 'root'} / {r['filename']}]\n{snippet}"
+        if len(nifs) >= 2:
+            part += (
+                f"\n⚠️ SYSTEM FLAG: this document contains multiple NIFs ({', '.join(sorted(nifs))}) "
+                "— more than one person/entity is named in it. Do not attribute its full value to a "
+                "single person without confirming each party's role/share."
+            )
+        context_parts.append(part)
     return context_parts, results, resolved_id, auto_name
 
 
