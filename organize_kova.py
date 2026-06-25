@@ -1209,9 +1209,14 @@ def scan_client(
 
     for (base_folder, group_key), images in merge_groups.items():
         category = categorize_by_name(group_key)
-        if category is None and use_vision and ai_client:
+        # Scans get an ad-hoc filename (phone camera, "img001_p1.jpg") far more
+        # often than a real one — vision runs alongside the filename check, not
+        # just when it fails, and wins on disagreement.
+        if use_vision and ai_client:
             print(f"    [vision] {images[0].name}  (group: {group_key})")
-            category = categorize_by_vision(images[0], ai_client)
+            vision_category = categorize_by_vision(images[0], ai_client)
+            if vision_category:
+                category = vision_category
         if category is None:
             category = "Documentos Pessoais"  # safe fallback for image groups
 
@@ -1228,18 +1233,31 @@ def scan_client(
         if file_path in merged_files:
             continue
 
+        ext = file_path.suffix.lower()
         name_category = categorize_by_name(file_path.stem)
-        content_category = categorize_by_content(_extract_pdf_text(file_path))
-        # Content wins over filename: a filename can be wrong (legacy misnamed
-        # file, or a real document with a generic/misleading name) in a way that
-        # still happens to match a category's filename rule. The content rules
-        # only cover a few high-confidence, header-scoped signals (see
-        # categorize_by_content), so this can only override into Rendimentos/
-        # Documentos Pessoais/Património — never an arbitrary category.
-        category = content_category if content_category else name_category
 
-        if category is None and use_vision and ai_client:
-            if file_path.suffix.lower() in IMAGE_EXTS | {".pdf"}:
+        if ext in IMAGE_EXTS:
+            # Images have no text layer to cross-check, and their filename is
+            # the least trustworthy of any file type here (phone-camera scans,
+            # ad-hoc names). Run vision alongside the filename check rather than
+            # only when it fails, and let vision win on disagreement.
+            category = name_category
+            if use_vision and ai_client:
+                print(f"    [vision] {file_path.name}")
+                vision_category = categorize_by_vision(file_path, ai_client)
+                if vision_category:
+                    category = vision_category
+        else:
+            content_category = categorize_by_content(_extract_pdf_text(file_path))
+            # Content wins over filename: a filename can be wrong (legacy misnamed
+            # file, or a real document with a generic/misleading name) in a way
+            # that still happens to match a category's filename rule. The content
+            # rules only cover a few high-confidence, header-scoped signals (see
+            # categorize_by_content), so this can only override into Rendimentos/
+            # Documentos Pessoais/Património — never an arbitrary category.
+            category = content_category if content_category else name_category
+
+            if category is None and use_vision and ai_client and ext == ".pdf":
                 print(f"    [vision] {file_path.name}")
                 category = categorize_by_vision(file_path, ai_client)
 
