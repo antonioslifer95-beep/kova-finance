@@ -598,13 +598,29 @@ CONTENT_RULES: Dict[str, List[str]] = {
         r"boletim de vencimentos", r"recibo de vencimentos",
         r"nota discriminativa.*atos clinicos", r"contrato de avenca",
     ],
+    "Documentos Pessoais": [
+        # Utility bills (electricity/gas/water) double as comprovativo de morada
+        # (address proof) — they share the "Extrato"/"Fatura" filename prefix
+        # with real bank/income docs but are neither. Matched against the header
+        # only (see categorize_by_content) — a bank statement can have a "DD EDP
+        # COMERCIAL" direct-debit *line* deep in its transaction table, which is
+        # not the same as the document itself being an EDP bill.
+        r"periodo de fatura", r"periodo de factura",
+    ],
     "Património": [
         # Savings/term-deposit accounts and treasury bonds/certificates are wealth/
         # assets, not a current-account bank statement and not earned income.
+        # Matched against the header only — a normal checking-account statement
+        # can still contain an empty/zero "CONTA POUPANÇA" section, or a "pag.
+        # igcp" treasury transfer line, deep in its transaction table.
         r"conta poupanca", r"solucao poupanca", r"aplicacao a prazo",
         r"deposito a prazo", r"certificados de aforro", r"certificados do tesouro",
-        r"\bigcp\b", r"activity statement", r"net asset value",
+        r"activity statement", r"net asset value",
         r"interactive brokers",
+        # Brazilian investment-fund position statements (Itaú "Dados do fundo" /
+        # "Saldo total em cotas" pages) — these share the "Extrato" filename
+        # prefix with real bank statements but report fund quotas, not cash.
+        r"dados do fundo", r"saldo total em cotas", r"fundo.?subconta",
     ],
 }
 _COMPILED_CONTENT_RULES: Dict[str, List] = {
@@ -612,11 +628,17 @@ _COMPILED_CONTENT_RULES: Dict[str, List] = {
     for cat, patterns in CONTENT_RULES.items()
 }
 
+# How much of a page's text counts as its "header" for content classification —
+# long transaction-table documents (bank statements, payslips) can mention almost
+# any keyword as a line-item description deep in the page; only a match near the
+# top reliably reflects what the document actually IS.
+_CONTENT_HEADER_CHARS = 800
+
 
 def categorize_by_content(text: str) -> Optional[str]:
     if not text:
         return None
-    norm = normalize_stem(text)
+    norm = normalize_stem(text[:_CONTENT_HEADER_CHARS])
     for category, patterns in _COMPILED_CONTENT_RULES.items():
         for pat in patterns:
             if pat.search(norm):
