@@ -1228,10 +1228,15 @@ def scan_client(
         if file_path in merged_files:
             continue
 
-        category = categorize_by_name(file_path.stem)
-
-        if category is None:
-            category = categorize_by_content(_extract_pdf_text(file_path))
+        name_category = categorize_by_name(file_path.stem)
+        content_category = categorize_by_content(_extract_pdf_text(file_path))
+        # Content wins over filename: a filename can be wrong (legacy misnamed
+        # file, or a real document with a generic/misleading name) in a way that
+        # still happens to match a category's filename rule. The content rules
+        # only cover a few high-confidence, header-scoped signals (see
+        # categorize_by_content), so this can only override into Rendimentos/
+        # Documentos Pessoais/Património — never an arbitrary category.
+        category = content_category if content_category else name_category
 
         if category is None and use_vision and ai_client:
             if file_path.suffix.lower() in IMAGE_EXTS | {".pdf"}:
