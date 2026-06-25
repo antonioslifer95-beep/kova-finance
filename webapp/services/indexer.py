@@ -184,10 +184,17 @@ def index_single_file(abs_path: str):
 
 def search(query: str, client_id: int = None, limit: int = 10) -> list:
     with get_db() as db:
+        # Financial documents (payslips, avença receipts) are short, and the actual
+        # figure is often a bare number far from any keyword the user searched for —
+        # a keyword-windowed snippet shows the AI the description but cuts the value
+        # right before it appears. Return the full body for short documents (covers
+        # virtually all single-page receipts/slips); only window genuinely long
+        # documents (multi-page bank statements) to keep the AI's context bounded.
         if client_id:
             rows = db.execute(
                 """SELECT d.id, d.filename, d.abs_path, d.category, c.folder_name,
-                          snippet(documents_fts, 4, '<mark>', '</mark>', '…', 24) AS snippet
+                          CASE WHEN length(documents_fts.body) <= 2000 THEN documents_fts.body
+                               ELSE snippet(documents_fts, 4, '<mark>', '</mark>', '…', 64) END AS snippet
                    FROM documents_fts
                    JOIN documents d ON d.id = documents_fts.doc_id
                    JOIN clients c ON c.id = d.client_id
@@ -198,7 +205,8 @@ def search(query: str, client_id: int = None, limit: int = 10) -> list:
         else:
             rows = db.execute(
                 """SELECT d.id, d.filename, d.abs_path, d.category, c.folder_name,
-                          snippet(documents_fts, 4, '<mark>', '</mark>', '…', 24) AS snippet
+                          CASE WHEN length(documents_fts.body) <= 2000 THEN documents_fts.body
+                               ELSE snippet(documents_fts, 4, '<mark>', '</mark>', '…', 64) END AS snippet
                    FROM documents_fts
                    JOIN documents d ON d.id = documents_fts.doc_id
                    JOIN clients c ON c.id = d.client_id

@@ -110,7 +110,7 @@ def _resolve_client_from_query(query: str) -> tuple:
     return best_id, best_name
 
 
-def _fetch_category_docs(client_id: int, category: str, limit: int = 8) -> list:
+def _fetch_category_docs(client_id: int, category: str, limit: int = 25) -> list:
     """Fetch documents directly from a specific category for a client."""
     with get_db() as db:
         rows = db.execute(
@@ -159,13 +159,20 @@ def _build_context(query: str, client_id: int = None) -> tuple:
         except Exception:
             pass
 
-    # Supplement with direct category fetch when intent is clear
+    # Supplement with direct category fetch when intent is clear. This fetch uses
+    # the full document body (up to 1500 chars), not the short FTS keyword-window
+    # snippet — so when a doc already matched the FTS search, REPLACE its snippet
+    # rather than skip it: a financial figure is often far from any matched
+    # keyword in the text, so the short snippet can show the AI a document
+    # description with no values while the full body has them.
     if intent_category and resolved_id:
-        existing_ids = {r["id"] for r in results}
-        for d in _fetch_category_docs(resolved_id, intent_category, limit=8):
-            if d["id"] not in existing_ids:
+        index_by_id = {r["id"]: i for i, r in enumerate(results)}
+        for d in _fetch_category_docs(resolved_id, intent_category, limit=25):
+            if d["id"] in index_by_id:
+                results[index_by_id[d["id"]]] = d
+            else:
                 results.append(d)
-                existing_ids.add(d["id"])
+                index_by_id[d["id"]] = len(results) - 1
 
     if not results:
         return [], [], resolved_id, auto_name
