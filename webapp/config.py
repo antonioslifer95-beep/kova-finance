@@ -19,7 +19,7 @@ ALGORITHM       = "HS256"
 TOKEN_EXPIRE_H  = 8
 
 STANDARD_FOLDERS = [
-    "Documentos Pessoais", "Rendimentos", "Extratos Bancários",
+    "Documentos Pessoais", "Rendimentos", "Extratos Bancários", "Património",
     "IRS", "Imóvel", "Mapa CRC", "RGPD", "Proposta Crédito",
 ]
 REQUIRED_PER_PERSON = {"Documentos Pessoais", "Rendimentos", "Mapa CRC"}
