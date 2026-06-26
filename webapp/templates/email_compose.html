@@ -1,0 +1,158 @@
+{% extends "base.html" %}
+{% block title %}Enviar Documentos — {{ client.folder_name }} — Kova Finance{% endblock %}
+{% block mob_dashboard %}active{% endblock %}
+
+{% block content %}
+<div>
+
+  <!-- Header -->
+  <div class="flex items-center gap-2 mb-4">
+    <a href="/clients/{{ client.id }}" class="text-gray-500 hover:text-gray-300 transition-colors flex-shrink-0">
+      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
+      </svg>
+    </a>
+    <div class="min-w-0">
+      <h1 class="text-base sm:text-xl font-semibold text-gray-100 truncate">Enviar Documentos</h1>
+      <p class="text-xs sm:text-sm text-gray-500">{{ client.folder_name }}</p>
+    </div>
+  </div>
+
+  {% if msg %}
+  <div class="mb-4 px-4 py-2.5 bg-red-900/30 border border-red-700/50 rounded-lg text-red-300 text-sm">
+    {{ msg|replace('+', ' ') }}
+  </div>
+  {% endif %}
+
+  <form method="post" action="/clients/{{ client.id }}/email/send" id="email-form" class="space-y-4">
+
+    <!-- File picker -->
+    <div class="bg-gray-900 rounded-xl border border-gray-800 p-4">
+      <h2 class="text-sm font-medium text-gray-300 mb-3">Selecionar ficheiros</h2>
+
+      {% set cat_icons = {
+        'Documentos Pessoais': '🪪',
+        'Rendimentos': '💶',
+        'Extratos Bancários': '🏦',
+        'IRS': '🧾',
+        'Imóvel': '🏠',
+        'Mapa CRC': '📊',
+        'RGPD': '🔒',
+        'Proposta Crédito': '📋',
+        'Dossier e Folha de Rosto': '🗂️',
+        'Sem categoria': '❓',
+      } %}
+
+      <div class="space-y-1 max-h-96 overflow-y-auto scrollbar-thin">
+        {% for sc, cats in subclients.items() %}
+
+          {% if has_subclients %}
+          <div class="px-1 pt-3 pb-1">
+            {% if sc %}
+              <span class="text-xs font-semibold uppercase tracking-wider text-indigo-400">{{ sc }}</span>
+            {% else %}
+              <span class="text-xs font-semibold uppercase tracking-wider text-gray-500">Partilhado</span>
+            {% endif %}
+          </div>
+          {% endif %}
+
+          {% for cat, docs in cats.items() %}
+          <div x-data="{ open: true }" class="bg-gray-950/40 rounded-lg border border-gray-800 {% if has_subclients %}ml-2{% endif %}">
+            <button type="button" @click="open=!open"
+                    class="w-full flex items-center justify-between px-3 py-2.5 text-sm font-medium text-gray-300 hover:text-white">
+              <span class="flex items-center gap-2">
+                <span>{{ cat_icons.get(cat, '📁') }}</span>
+                <span>{{ cat }}</span>
+              </span>
+              <span class="flex items-center gap-2">
+                <span class="text-xs text-gray-500">{{ docs|length }}</span>
+                <svg class="w-3 h-3 transition-transform" :class="open ? 'rotate-180' : ''"
+                     fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                </svg>
+              </span>
+            </button>
+            <div x-show="open" x-cloak class="border-t border-gray-800">
+              {% for doc in docs %}
+              <label class="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-400 hover:bg-gray-800 hover:text-gray-200 cursor-pointer transition-colors">
+                <input type="checkbox" name="doc_ids" value="{{ doc.id }}" data-size="{{ doc.file_size or 0 }}"
+                       onchange="kovaUpdateTotal()"
+                       class="w-4 h-4 rounded border-gray-700 bg-gray-800 text-indigo-600 focus:ring-indigo-600 flex-shrink-0"/>
+                <span class="truncate flex-1">{{ doc.filename }}</span>
+                <span class="text-gray-600 flex-shrink-0">{{ ((doc.file_size or 0) / 1024)|round|int }} KB</span>
+              </label>
+              {% endfor %}
+            </div>
+          </div>
+          {% endfor %}
+
+        {% endfor %}
+      </div>
+
+      <div class="flex items-center justify-between mt-3 pt-3 border-t border-gray-800 text-xs">
+        <span class="text-gray-500">Total selecionado: <span id="kova-total-size" class="text-gray-300">0 MB</span> / 18 MB</span>
+        <span id="kova-size-warning" class="text-red-400 hidden">Excede o limite de 18 MB — remova alguns ficheiros.</span>
+      </div>
+    </div>
+
+    <!-- Recipient -->
+    <div class="bg-gray-900 rounded-xl border border-gray-800 p-4 space-y-3">
+      <h2 class="text-sm font-medium text-gray-300 mb-1">Destinatário</h2>
+
+      {% if contacts %}
+      <select onchange="document.getElementById('recipient_email').value = this.value ? this.options[this.selectedIndex].dataset.email : ''; document.getElementById('bank_contact_id').value = this.value;"
+              class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200">
+        <option value="">— Selecionar contacto bancário (opcional) —</option>
+        {% for c in contacts %}
+        <option value="{{ c.id }}" data-email="{{ c.email }}">
+          {{ c.bank_name }}{% if c.contact_name %} — {{ c.contact_name }}{% endif %} ({{ c.email }})
+        </option>
+        {% endfor %}
+      </select>
+      {% else %}
+      <p class="text-xs text-gray-500">Sem contactos bancários guardados — adicione um em Settings, ou introduza o email manualmente abaixo.</p>
+      {% endif %}
+
+      <input type="hidden" name="bank_contact_id" id="bank_contact_id" value=""/>
+      <input type="email" name="recipient_email" id="recipient_email" required placeholder="email@banco.pt"
+             class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200"/>
+    </div>
+
+    <!-- Subject / body -->
+    <div class="bg-gray-900 rounded-xl border border-gray-800 p-4 space-y-3">
+      <input type="text" name="subject" required value="Documentos — {{ client.folder_name }}"
+             class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200" placeholder="Assunto"/>
+      <textarea name="body" rows="6" placeholder="Mensagem (opcional)"
+                class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200"></textarea>
+    </div>
+
+    <button type="submit" id="kova-send-btn"
+            class="w-full bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2.5 rounded-lg text-sm font-medium transition-colors">
+      Enviar Email
+    </button>
+
+  </form>
+</div>
+
+<script>
+function kovaUpdateTotal() {
+  const boxes = document.querySelectorAll('#email-form input[name="doc_ids"]:checked');
+  let total = 0;
+  boxes.forEach(b => total += parseInt(b.dataset.size || '0', 10));
+  const mb = total / (1024 * 1024);
+  const SAFE_MB = 18;
+  document.getElementById('kova-total-size').textContent = mb.toFixed(1) + ' MB';
+  const warn = document.getElementById('kova-size-warning');
+  const btn  = document.getElementById('kova-send-btn');
+  if (mb > SAFE_MB) {
+    warn.classList.remove('hidden');
+    btn.disabled = true;
+    btn.classList.add('opacity-50', 'cursor-not-allowed');
+  } else {
+    warn.classList.add('hidden');
+    btn.disabled = false;
+    btn.classList.remove('opacity-50', 'cursor-not-allowed');
+  }
+}
+</script>
+{% endblock %}

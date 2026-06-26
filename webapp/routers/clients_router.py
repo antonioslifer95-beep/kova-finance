@@ -213,6 +213,11 @@ def client_detail(request: Request, client_id: int, msg: str = "", n: int = 0):
         stats   = client_stats(db, client_id)
         missing = _compute_missing(db, client_id, stats)
 
+        email_history = db.execute(
+            "SELECT * FROM email_log WHERE client_id=? ORDER BY created_at DESC",
+            (client_id,)
+        ).fetchall()
+
     return tmpl.TemplateResponse("client_detail.html", {
         "request": request, "user": user,
         "client":    dict(client),
@@ -222,6 +227,7 @@ def client_detail(request: Request, client_id: int, msg: str = "", n: int = 0):
         "stats":   stats,
         "missing": missing,
         "std_folders": STANDARD_FOLDERS,
+        "email_history": [dict(h) for h in email_history],
         "msg": msg, "msg_n": n,
         "token": request.cookies.get("kova_token", ""),
     })

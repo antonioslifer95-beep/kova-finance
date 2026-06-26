@@ -41,6 +41,17 @@
         </svg>
         <span class="hidden sm:inline">Gerar Pacote</span>
       </a>
+      <!-- Email to bank: icon only on mobile -->
+      <a href="/clients/{{ client.id }}/email"
+         class="flex items-center gap-1.5 text-xs px-2 sm:px-3 py-1.5 rounded-lg
+                bg-gray-800 hover:bg-gray-700 border border-gray-700
+                text-gray-400 hover:text-gray-200 transition-colors">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+        </svg>
+        <span class="hidden sm:inline">Enviar para Banco</span>
+      </a>
     </div>
   </div>
 
@@ -59,6 +70,26 @@
   <div class="mb-4 px-4 py-2.5 bg-indigo-900/30 border border-indigo-700/50 rounded-lg text-indigo-300 text-sm">
     OCR queued for {{ msg_n }} image file{{ 's' if msg_n != 1 else '' }} — results available once indexing completes.
   </div>
+  {% elif msg == 'email_sent' %}
+  <div class="mb-4 px-4 py-2.5 bg-green-900/30 border border-green-700/50 rounded-lg text-green-300 text-sm">
+    Email sent with {{ msg_n }} file{{ 's' if msg_n != 1 else '' }}.
+  </div>
+  {% endif %}
+
+  {% if email_history %}
+  <details class="mb-4 group">
+    <summary class="cursor-pointer text-xs text-gray-500 hover:text-gray-300">
+      Email history ({{ email_history|length }})
+    </summary>
+    <div class="mt-2 space-y-1 text-xs text-gray-500">
+      {% for h in email_history %}
+      <div class="flex justify-between border-b border-gray-800 py-1 gap-3">
+        <span class="truncate">{{ h.recipient_email }} — {{ h.subject }}</span>
+        <span class="flex-shrink-0 {% if h.status == 'failed' %}text-red-400{% endif %}">{{ h.created_at }} ({{ h.status }})</span>
+      </div>
+      {% endfor %}
+    </div>
+  </details>
   {% endif %}
 
   <!-- Main layout: stacked on mobile, side-by-side on desktop -->

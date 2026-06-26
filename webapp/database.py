@@ -86,13 +86,48 @@ CREATE TABLE IF NOT EXISTS pending_clients (
     updated_at    TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS bank_contacts (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    bank_name    TEXT NOT NULL,
+    contact_name TEXT,
+    email        TEXT NOT NULL,
+    notes        TEXT,
+    is_active    INTEGER NOT NULL DEFAULT 1,
+    created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS email_log (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    client_id        INTEGER REFERENCES clients(id) ON DELETE SET NULL,
+    bank_contact_id  INTEGER REFERENCES bank_contacts(id) ON DELETE SET NULL,
+    recipient_email  TEXT NOT NULL,
+    subject          TEXT NOT NULL,
+    body             TEXT,
+    doc_ids          TEXT NOT NULL,
+    filenames        TEXT NOT NULL,
+    total_bytes      INTEGER,
+    status           TEXT NOT NULL DEFAULT 'sent',
+    error_message    TEXT,
+    gmail_message_id TEXT,
+    sent_by_user_id  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    created_at       TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE INDEX IF NOT EXISTS idx_docs_client    ON documents(client_id);
 CREATE INDEX IF NOT EXISTS idx_docs_category  ON documents(client_id, category);
 CREATE INDEX IF NOT EXISTS idx_chat_user      ON chat_messages(user_id, client_id);
+CREATE INDEX IF NOT EXISTS idx_email_log_client ON email_log(client_id);
 
 INSERT OR IGNORE INTO settings(key,value) VALUES ('anthropic_api_key','');
 INSERT OR IGNORE INTO settings(key,value) VALUES ('watcher_enabled','1');
 INSERT OR IGNORE INTO settings(key,value) VALUES ('index_on_startup','1');
+INSERT OR IGNORE INTO settings(key,value) VALUES ('gmail_client_id','');
+INSERT OR IGNORE INTO settings(key,value) VALUES ('gmail_client_secret','');
+INSERT OR IGNORE INTO settings(key,value) VALUES ('gmail_refresh_token','');
+INSERT OR IGNORE INTO settings(key,value) VALUES ('gmail_access_token','');
+INSERT OR IGNORE INTO settings(key,value) VALUES ('gmail_token_expiry','');
+INSERT OR IGNORE INTO settings(key,value) VALUES ('gmail_connected_email','');
+INSERT OR IGNORE INTO settings(key,value) VALUES ('gmail_signature','');
 """
 
 def init_db():
