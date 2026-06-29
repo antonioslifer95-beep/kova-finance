@@ -52,3 +52,8 @@
     {% endfor %}
   </div>
 </div>
+{% if max_term %}
+<script>
+  window.dispatchEvent(new CustomEvent('kova:max-term', { detail: {{ max_term }} }));
+</script>
+{% endif %}

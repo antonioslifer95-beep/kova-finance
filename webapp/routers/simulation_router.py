@@ -41,8 +41,23 @@ def client_data_partial(request: Request, client_id: int):
     persons = get_persons(client_id)
     for p in persons:
         p["extracted"] = extract_person_data(client_id, p["key"])
+
+    # Max term: oldest non-fiador holder must be ≤ 75 at mortgage end
+    holder_ages = []
+    for p in persons:
+        if p.get("is_fiador"):
+            continue
+        age = (p.get("extracted") or {}).get("age")
+        if age and isinstance(age, (int, float)):
+            holder_ages.append(int(age))
+    max_term = None
+    if holder_ages:
+        mt = (75 - max(holder_ages)) * 12
+        if mt > 0:
+            max_term = min(mt, 480)
+
     return tmpl.TemplateResponse("partials/sim_persons.html", {
-        "request": request, "persons": persons,
+        "request": request, "persons": persons, "max_term": max_term,
     })
 
 

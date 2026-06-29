@@ -273,6 +273,10 @@ function sim() {
     fixedTan:      0,
     fixedMonths:   0,
 
+    init() {
+      window.addEventListener('kova:max-term', e => { this.termMonths = e.detail; });
+    },
+
     get ltv() {
       if (!this.financeAmount || !this.propertyValue) return null;
       return (this.financeAmount / this.propertyValue * 100).toFixed(1);
