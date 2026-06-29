@@ -37,16 +37,19 @@ def client_data_partial(request: Request, client_id: int):
             "request": request,
         })
 
-    from services.pdf_package import get_persons, extract_person_data
+    from services.pdf_package import get_persons, extract_person_data, extract_transfer_data
     persons = get_persons(client_id)
     for p in persons:
         p["extracted"] = extract_person_data(client_id, p["key"])
 
     # Max term: oldest non-fiador holder must be ≤ 75 at mortgage end
     holder_ages = []
+    primary_key = None
     for p in persons:
         if p.get("is_fiador"):
             continue
+        if primary_key is None:
+            primary_key = p["key"]
         age = (p.get("extracted") or {}).get("age")
         if age and isinstance(age, (int, float)):
             holder_ages.append(int(age))
@@ -56,8 +59,12 @@ def client_data_partial(request: Request, client_id: int):
         if mt > 0:
             max_term = min(mt, 480)
 
+    # Transfer data: housing mortgage balance + months left from Mapa CRC
+    transfer_data = extract_transfer_data(client_id, primary_key or "")
+
     return tmpl.TemplateResponse("partials/sim_persons.html", {
-        "request": request, "persons": persons, "max_term": max_term,
+        "request": request, "persons": persons,
+        "max_term": max_term, "transfer_data": transfer_data,
     })
 
 

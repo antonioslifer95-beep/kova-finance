@@ -57,3 +57,8 @@
   window.dispatchEvent(new CustomEvent('kova:max-term', { detail: {{ max_term }} }));
 </script>
 {% endif %}
+{% if transfer_data %}
+<script>
+  window.dispatchEvent(new CustomEvent('kova:transfer-data', { detail: {{ transfer_data | tojson }} }));
+</script>
+{% endif %}

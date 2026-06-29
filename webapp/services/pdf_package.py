@@ -128,6 +128,81 @@ def extract_person_data(client_id: int, subclient_key: str) -> dict:
         return {}
 
 
+def extract_transfer_data(client_id: int, subclient_key: str) -> dict:
+    """
+    From Mapa CRC, extract the housing mortgage details needed for a credit transfer:
+    remaining balance and end date → months left. Returns {} if not found.
+    """
+    api_key = setting("anthropic_api_key")
+    if not api_key:
+        return {}
+
+    with get_db() as db:
+        if subclient_key:
+            rows = db.execute(
+                """SELECT fts.body, d.filename
+                   FROM documents_fts fts
+                   JOIN documents d ON d.id = fts.doc_id
+                   WHERE d.client_id=? AND d.subclient=?
+                     AND d.category='Mapa CRC' AND fts.body != ''""",
+                (client_id, subclient_key)
+            ).fetchall()
+        else:
+            rows = db.execute(
+                """SELECT fts.body, d.filename
+                   FROM documents_fts fts
+                   JOIN documents d ON d.id = fts.doc_id
+                   WHERE d.client_id=? AND d.subclient IS NULL
+                     AND d.category='Mapa CRC' AND fts.body != ''""",
+                (client_id,)
+            ).fetchall()
+
+    if not rows:
+        return {}
+
+    context = "\n\n".join(
+        f"[{r['filename']}]\n{(r['body'] or '')[:6000]}" for r in rows[:4]
+    )
+    today = date.today().isoformat()
+    prompt = (
+        f"From this Portuguese Mapa CRC (credit report), find the HOUSING mortgage "
+        f"(crédito habitação / HPP / habitação própria permanente). "
+        f"Return ONLY a valid JSON object with these keys (null if not found):\n"
+        f'- "mortgage_balance": remaining balance in euros (\"Total em dívida\" or \"Saldo em dívida\" '
+        f'for the housing credit entry) as a number\n'
+        f'- "mortgage_end_date": the contract end date for the housing credit as shown '
+        f'in the document (dd/mm/yyyy format)\n\n'
+        f"Documents:\n{context}"
+    )
+    try:
+        import anthropic
+        ai = anthropic.Anthropic(api_key=api_key)
+        msg = ai.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=150,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        text = msg.content[0].text.strip()
+        text = re.sub(r'^```(?:json)?', '', text).rstrip('`').strip()
+        result = json.loads(text)
+    except Exception:
+        return {}
+
+    # Calculate months left from the end date
+    end_date_str = result.get("mortgage_end_date")
+    if end_date_str:
+        try:
+            day, month, year = end_date_str.strip().split("/")
+            end_date = date(int(year), int(month), int(day))
+            today_date = date.today()
+            months_left = (end_date.year - today_date.year) * 12 + (end_date.month - today_date.month)
+            result["mortgage_months_left"] = max(0, months_left)
+        except Exception:
+            pass
+
+    return result
+
+
 # ── Merged dossier PDF ────────────────────────────────────────────────────────
 
 def merge_person_pdf(docs: list, output_path: str) -> int:

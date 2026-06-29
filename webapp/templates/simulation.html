@@ -55,6 +55,7 @@
         <div>
           <label class="block text-xs text-gray-500 mb-1">Tipo de operação</label>
           <select name="operation_type"
+                  x-model="operationType"
                   class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm
                          text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500">
             <option>Aquisição</option>
@@ -265,6 +266,7 @@
 function sim() {
   return {
     rateType:      'variable',
+    operationType: 'Aquisição',
     financeAmount: 0,
     propertyValue: 0,
     termMonths:    0,
@@ -272,9 +274,23 @@ function sim() {
     spread:        0,
     fixedTan:      0,
     fixedMonths:   0,
+    transferData:  null,
 
     init() {
       window.addEventListener('kova:max-term', e => { this.termMonths = e.detail; });
+      window.addEventListener('kova:transfer-data', e => {
+        this.transferData = e.detail;
+        if (this.operationType === 'Transferência de Crédito') this._applyTransfer();
+      });
+      this.$watch('operationType', v => {
+        if (v === 'Transferência de Crédito' && this.transferData) this._applyTransfer();
+      });
+    },
+
+    _applyTransfer() {
+      const d = this.transferData;
+      if (d.mortgage_balance)    this.financeAmount = d.mortgage_balance;
+      if (d.mortgage_months_left) this.termMonths   = d.mortgage_months_left;
     },
 
     get ltv() {
