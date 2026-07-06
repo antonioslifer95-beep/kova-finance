@@ -249,6 +249,7 @@ CATEGORY_RULES: Dict[str, List[str]] = {
         r"^CertNaoDivida", r"^CertPredialNegativa_",
         r"^DeclEmpresaEndereco", r"^DeclFinsBancarios",
         r"^DeclVinculo_", r"^CarreiraContrib", r"^CartaVerde_",
+        r"^AMIM_",  # Atestado Médico de Incapacidade Multiúso
     ],
 }
 
@@ -314,6 +315,7 @@ Documentos Pessoais:
   career history                →  CarreiraContributiva_Person
   fiscal certificate            →  CertNaoDividaFinancas_Person
   SS certificate                →  CertNaoDividaSS_Person
+  disability certificate (AMIM) →  AMIM_Person
 
 Mapa CRC:
   CRC map (Banco de Portugal)    →  MapaCRC_YYYY-MM_Person
@@ -516,6 +518,7 @@ NORMALIZED_RULES: Dict[str, List[str]] = {
         r"^comprovativo de morada", r"^comprovativo morada", r"^comp.?morada",
         r"^identificacao", r"^numero de utente", r"^iban( |$)",
         r"certidao de casamento", r"^certidao.*casamento",
+        r"atestado.*incapacidade", r"atestado multiusos", r"^amim",  # AMIM disability cert
         # UK/foreign utility providers used as address proof
         r"thames water", r"southern water", r"anglian water", r"severn trent",
         r"yorkshire water", r"united utilities", r"welsh water", r"wessex water",
@@ -565,7 +568,8 @@ VISION_PROMPT = (
     "- Documentos Pessoais (CC identity card, passport, residence permit TituloResidencia, "
     "IBAN proof CompIBAN, address proof CompMorada including foreign utility bills "
     "(Thames Water, British Gas, electricity/gas/water bill in any language), "
-    "fiscal domicile, debt-free certificates CertNaoDivida, career history CarreiraContributiva)\n"
+    "fiscal domicile, debt-free certificates CertNaoDivida, career history CarreiraContributiva, "
+    "disability certificate AMIM / Atestado Médico de Incapacidade Multiúso)\n"
     "- Rendimentos (payslip RecVenc / Boletim de Vencimentos, employer declaration DeclPatronal, "
     "work contract ContratoTrabalho, income declarations, freelance invoice-receipt "
     "recibo verde / fatura-recibo, rent receipt recibo de renda, "
@@ -649,6 +653,7 @@ CONTENT_RULES: Dict[str, List[str]] = {
         # COMERCIAL" direct-debit *line* deep in its transaction table, which is
         # not the same as the document itself being an EDP bill.
         r"periodo de fatura", r"periodo de factura",
+        r"atestado.*incapacidade", r"atestado medico.*multiuso", r"grau de incapacidade",
         # English-language utility bills (UK address proofs)
         r"thames water", r"southern water", r"anglian water", r"severn trent",
         r"yorkshire water", r"united utilities", r"welsh water", r"wessex water",
