@@ -293,7 +293,10 @@ Património (savings, investments, bonds — NOT everyday bank statements):
   investment/brokerage statement (carteira de investimento, stocks, funds) →  CarteiraInvestimento_YYYY-MM_BankName_Person
 
 IRS:
-  tax declaration               →  IRS_YYYY_Person
+  Modelo 3 IRS declaration (comprovativo de entrega, from AT portal)
+                                →  Modelo3_YYYY  (joint couple — no person suffix)
+                                →  Modelo3_YYYY_Person  (single filer)
+  tax declaration (other)       →  IRS_YYYY_Person
   liquidation note              →  NotaLiq_IRS_YYYY_Person
   IES report                    →  IES_YYYY_Person
   UK P60 end-of-year certificate →  P60_YYYY-YY_Person  (YYYY-YY = UK tax year, e.g. 2025-26)
@@ -388,7 +391,7 @@ def _sanitize_stem(raw: str) -> Optional[str]:
     # literally (e.g. "CC_Person", "Extrato_BankName") instead of a real value —
     # happens when it couldn't read the document (poor scan quality, etc).
     tokens = {t.lower() for t in re.split(r'[_\-]', s) if t}
-    if tokens & {"person", "bankname", "firstname"}:
+    if tokens & {"person", "bankname", "firstname", "yyyy", "mm", "dd"}:
         return None
     return s
 
@@ -496,6 +499,7 @@ NORMALIZED_RULES: Dict[str, List[str]] = {
         r"^dipf", r"declaracao.*irs", r"attestation.*impots",
         r"informederendimentosfinanceiros", r"declar.*ano.*ex",
         r"^comprovativo ir[_\s]",  # Brazilian IR (income tax) proof
+        r"modelo.?3", r"comprovativo.*modelo",
         # UK annual tax forms — equivalent to Portuguese IRS
         r"\bp60\b", r"\bp45\b", r"\bp11d\b",
     ],
@@ -627,6 +631,11 @@ CONTENT_RULES: Dict[str, List[str]] = {
         r"nota discriminativa.*atos clinicos", r"contrato de avenca",
     ],
     "IRS": [
+        # Portuguese IRS documents (born-digital PDFs from AT portal)
+        r"declaracao de rendimentos.*irs", r"modelo.?3",
+        r"comprovativo.*modelo.?3", r"comprovativo de entrega.*irs",
+        r"autoridade tributaria e aduaneira",
+        r"nota de liquidacao", r"nota liquidacao",
         # UK P60 header text — year-end tax summary, equivalent to Portuguese IRS
         r"p60", r"end.of.year certificate", r"total for year",
         # UK P45 — leaving employment tax form
