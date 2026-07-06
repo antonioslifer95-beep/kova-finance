@@ -220,6 +220,7 @@ CATEGORY_RULES: Dict[str, List[str]] = {
     "IRS": [
         r"^IRS_", r"^NotaLiq_IRS_", r"^NotaLiq_", r"^IES_",
         r"^ComprovativoIRS_", r"^DeclIRS_", r"^Modelo3_", r"^Reembolso_",
+        r"^P60_", r"^P45_", r"^P11D_",
     ],
     "Imóvel": [
         r"^CPCV[_.]", r"^CPCV$", r"^Adenda_",
@@ -295,6 +296,9 @@ IRS:
   tax declaration               →  IRS_YYYY_Person
   liquidation note              →  NotaLiq_IRS_YYYY_Person
   IES report                    →  IES_YYYY_Person
+  UK P60 end-of-year certificate →  P60_YYYY-YY_Person  (YYYY-YY = UK tax year, e.g. 2025-26)
+  UK P45 leaving employment      →  P45_YYYY-MM_Person
+  UK P11D benefits in kind       →  P11D_YYYY-YY_Person
 
 Documentos Pessoais:
   ID card (cartão cidadão/CC)   →  CC_Person
@@ -309,7 +313,9 @@ Documentos Pessoais:
   SS certificate                →  CertNaoDividaSS_Person
 
 Mapa CRC:
-  CRC map                       →  MapaCRC_YYYY-MM_Person
+  CRC map (Banco de Portugal)    →  MapaCRC_YYYY-MM_Person
+  Foreign credit bureau report   →  MapaCRC_BureauName_YYYY-MM_Person
+    (BureauName: Experian, Equifax, TransUnion, etc.)
 
 RGPD:
   consent form                  →  RGPD_Person
