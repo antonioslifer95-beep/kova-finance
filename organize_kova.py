@@ -261,6 +261,9 @@ This is a page from a Portuguese mortgage dossier.
 Category folder: {category}
 {person_line}
 
+Document text (all pages, truncated):
+{text_context}
+
 Generate a standardized filename stem (NO extension) following these exact rules:
 
 Rendimentos:
@@ -343,6 +346,9 @@ Rules:
 - Person = the person's first name as shown in the dossier (e.g. Tiago, Dalila)
 - BankName = short name of the bank/institution
 - If a detail is not visible, omit that part
+- Multi-period documents: if the file contains more than one period (e.g. two payslips,
+  April and May in the same PDF), include both months: RecVenc_2026-04_2026-05_Person
+- UK tax year (P60): use the two-year range, e.g. IRS_2025-26_Person
 - Reply with ONLY the filename stem, nothing else
 """
 
@@ -416,9 +422,12 @@ def generate_standard_name(path: Path, category: str, person: Optional[str], ai_
         f"Person: {person}" if person
         else "Person: UNKNOWN — do NOT guess or include any name (even a partial one) in the filename."
     )
+    full_text = _extract_pdf_text(path) if ext_lower == ".pdf" else ""
+    text_context = full_text[:4000].strip() if full_text else "(no text layer — image scan)"
     prompt = RENAME_PROMPT.format(
         category=category,
         person_line=person_line,
+        text_context=text_context,
     )
     try:
         resp = ai_client.messages.create(
@@ -481,11 +490,15 @@ NORMALIZED_RULES: Dict[str, List[str]] = {
         r"^dipf", r"declaracao.*irs", r"attestation.*impots",
         r"informederendimentosfinanceiros", r"declar.*ano.*ex",
         r"^comprovativo ir[_\s]",  # Brazilian IR (income tax) proof
+        # UK annual tax forms — equivalent to Portuguese IRS
+        r"\bp60\b", r"\bp45\b", r"\bp11d\b",
     ],
     "Mapa CRC": [
         r"mapa.?crc", r"resp(onsabilidades)?.?(bp|banco)", r"responsabilidades.*banco",
         r"banco.?portugal",  # catches typos like "Respsabilidades BANCO Portugal"
         r"^mapa_crc",
+        # UK/international credit bureaus — their reports are equivalent to Mapa CRC
+        r"experian", r"equifax", r"transunion", r"credit report", r"credit score",
     ],
     "Documentos Pessoais": [
         r"^cc ?-", r"^cc [a-z]", r"^nif( |$)", r"^niss( |$)",
@@ -493,6 +506,11 @@ NORMALIZED_RULES: Dict[str, List[str]] = {
         r"^comprovativo de morada", r"^comprovativo morada", r"^comp.?morada",
         r"^identificacao", r"^numero de utente", r"^iban( |$)",
         r"certidao de casamento", r"^certidao.*casamento",
+        # UK/foreign utility providers used as address proof
+        r"thames water", r"southern water", r"anglian water", r"severn trent",
+        r"yorkshire water", r"united utilities", r"welsh water", r"wessex water",
+        r"british gas", r"octopus energy", r"eon energy", r"edf energy",
+        r"utility bill", r"water bill", r"electricity bill", r"gas bill",
     ],
     "Imóvel": [
         r"^escritura( de| $)", r"^caderneta", r"^certidao predial",
@@ -535,21 +553,25 @@ VISION_PROMPT = (
     "This is a scanned page from a Portuguese mortgage application dossier. "
     "Classify it into exactly ONE of these categories:\n"
     "- Documentos Pessoais (CC identity card, passport, residence permit TituloResidencia, "
-    "IBAN proof CompIBAN, address proof CompMorada, fiscal domicile, "
-    "debt-free certificates CertNaoDivida, career history CarreiraContributiva)\n"
+    "IBAN proof CompIBAN, address proof CompMorada including foreign utility bills "
+    "(Thames Water, British Gas, electricity/gas/water bill in any language), "
+    "fiscal domicile, debt-free certificates CertNaoDivida, career history CarreiraContributiva)\n"
     "- Rendimentos (payslip RecVenc / Boletim de Vencimentos, employer declaration DeclPatronal, "
     "work contract ContratoTrabalho, income declarations, freelance invoice-receipt "
     "recibo verde / fatura-recibo, rent receipt recibo de renda, "
-    "freelance avença earnings statement / Nota Discriminativa dos Atos Clínicos / Contrato de Avença)\n"
+    "freelance avença earnings statement / Nota Discriminativa dos Atos Clínicos / Contrato de Avença; "
+    "NOT a P60 or P45 — those are annual tax summaries and go under IRS)\n"
     "- Extratos Bancários (CURRENT/CHECKING account statement only — depósito à ordem)\n"
     "- Património (savings/term-deposit account extract, treasury bonds/certificates IGCP, "
     "investment or brokerage account statement — stocks, funds, bonds; NOT a checking-account "
     "statement even if it looks similar)\n"
-    "- IRS (tax return declaration, IRS liquidation note NotaLiquidacao, IES annual report)\n"
+    "- IRS (tax return declaration, IRS liquidation note NotaLiquidacao, IES annual report, "
+    "or UK annual tax forms: P60 end-of-year certificate, P45 leaving employment)\n"
     "- Imóvel (CPCV purchase promise, property certificate CertidaoPredial, "
     "land register Caderneta Predial, energy certificate, usage licence, "
     "lease/rental contract, property plans or drawings)\n"
-    "- Mapa CRC (Banco de Portugal credit responsibility map)\n"
+    "- Mapa CRC (Banco de Portugal credit responsibility map, or foreign credit bureau report "
+    "such as Experian, Equifax, TransUnion — even if in English)\n"
     "- RGPD (data protection / GDPR consent form with signature)\n"
     "- Proposta Crédito (credit proposal, bank simulation, mortgage application form, "
     "life insurance simulation / seguro de vida simulation, "
@@ -598,6 +620,12 @@ CONTENT_RULES: Dict[str, List[str]] = {
         r"boletim de vencimentos", r"recibo de vencimentos",
         r"nota discriminativa.*atos clinicos", r"contrato de avenca",
     ],
+    "IRS": [
+        # UK P60 header text — year-end tax summary, equivalent to Portuguese IRS
+        r"p60", r"end.of.year certificate", r"total for year",
+        # UK P45 — leaving employment tax form
+        r"p45", r"details of employee leaving",
+    ],
     "Documentos Pessoais": [
         # Utility bills (electricity/gas/water) double as comprovativo de morada
         # (address proof) — they share the "Extrato"/"Fatura" filename prefix
@@ -606,6 +634,11 @@ CONTENT_RULES: Dict[str, List[str]] = {
         # COMERCIAL" direct-debit *line* deep in its transaction table, which is
         # not the same as the document itself being an EDP bill.
         r"periodo de fatura", r"periodo de factura",
+        # English-language utility bills (UK address proofs)
+        r"thames water", r"southern water", r"anglian water", r"severn trent",
+        r"yorkshire water", r"united utilities", r"welsh water", r"wessex water",
+        r"british gas", r"octopus energy", r"eon energy", r"edf energy",
+        r"billing period",
     ],
     "Património": [
         # Savings/term-deposit accounts and treasury bonds/certificates are wealth/
@@ -628,11 +661,11 @@ _COMPILED_CONTENT_RULES: Dict[str, List] = {
     for cat, patterns in CONTENT_RULES.items()
 }
 
-# How much of a page's text counts as its "header" for content classification —
-# long transaction-table documents (bank statements, payslips) can mention almost
-# any keyword as a line-item description deep in the page; only a match near the
-# top reliably reflects what the document actually IS.
-_CONTENT_HEADER_CHARS = 800
+# How many characters of the full extracted text (all pages) are checked for content
+# classification. Large enough to cover a multi-page document's identifying headers,
+# but capped to avoid false positives from transaction-table body text deep in bank
+# statements (e.g. a "DD EDP COMERCIAL" debit line isn't the same as being an EDP bill).
+_CONTENT_HEADER_CHARS = 3000
 
 
 def categorize_by_content(text: str) -> Optional[str]:
@@ -863,15 +896,15 @@ IDENTITY_PROMPT = (
 
 
 def _extract_pdf_text(path: Path) -> str:
-    """First-page text layer of a born-digital PDF. Empty string for scans/images."""
+    """Text layer from all pages of a born-digital PDF. Empty string for scans/images."""
     if path.suffix.lower() != ".pdf":
         return ""
     try:
         import fitz
         doc = fitz.open(str(path))
-        text = doc[0].get_text()
+        pages = [doc[i].get_text() for i in range(len(doc))]
         doc.close()
-        return text
+        return "\n".join(pages)
     except Exception:
         return ""
 
