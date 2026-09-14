@@ -18,6 +18,12 @@ Usage:
     # Claude writes claude_categorizations.json
     python organize_kova.py --apply-categorizations      # Apply Claude's answers
 
+Per-client overrides (optional):
+    Drop a .kova.json file in a client folder to state what the documents cannot say,
+    e.g. which accounts the two applicants hold jointly:
+        {"joint_accounts": ["PT50..."], "joint_files": ["Extrato_2026-04_CGD.pdf"]}
+    See load_client_config().
+
 Requirements:
     pip install anthropic img2pdf Pillow pymupdf
     ANTHROPIC_API_KEY must be set in environment (or use --api-key) for --apply vision mode
@@ -276,6 +282,7 @@ Rendimentos:
   social-manager declaration    →  DeclSocioGerente_Person
   salary declaration            →  DeclInternaPagSalarial_Person
   freelance invoice-receipt (recibo verde / fatura-recibo)  →  FaturaRecibo_YYYY-MM_Person
+  AT portal listing of issued fatura-recibo over a period    →  ReciboVerde_YYYY-MM_YYYY-MM_Person
   rent receipt (recibo de renda) →  ReciboRenda_YYYY-MM_Person
   avença / nota discriminativa dos atos clínicos (contrato de avença)  →  ReciboAvenca_YYYY-MM_Person
   payslip from a "Boletim de Vencimentos" template  →  RecVenc_YYYY-MM_Person  (same as any other payslip)
@@ -299,6 +306,9 @@ IRS:
                                 →  Modelo3_YYYY_Person  (single filer)
   tax declaration (other)       →  IRS_YYYY_Person
   liquidation note              →  NotaLiq_IRS_YYYY_Person
+  A married couple filing jointly has ONE declaration and ONE liquidation note
+  for both of them: when the document names two sujeitos passivos (A and B),
+  leave the person suffix off entirely - Modelo3_YYYY, IRS_YYYY, NotaLiq_IRS_YYYY.
   IES report                    →  IES_YYYY_Person
   UK P60 end-of-year certificate →  P60_YYYY-YY_Person  (YYYY-YY = UK tax year, e.g. 2025-26)
   UK P45 leaving employment      →  P45_YYYY-MM_Person
@@ -573,6 +583,8 @@ VISION_PROMPT = (
     "- Rendimentos (payslip RecVenc / Boletim de Vencimentos, employer declaration DeclPatronal, "
     "work contract ContratoTrabalho, income declarations, freelance invoice-receipt "
     "recibo verde / fatura-recibo, rent receipt recibo de renda, "
+    "an AT portal \"Faturas e Recibos\" screen listing issued FATURA-RECIBO documents "
+    "(the applicant's own recibos verdes), "
     "freelance avença earnings statement / Nota Discriminativa dos Atos Clínicos / Contrato de Avença; "
     "NOT a P60 or P45 — those are annual tax summaries and go under IRS)\n"
     "- Extratos Bancários (CURRENT/CHECKING account statement only — depósito à ordem)\n"
@@ -590,6 +602,11 @@ VISION_PROMPT = (
     "- Proposta Crédito (credit proposal, bank simulation, mortgage application form, "
     "life insurance simulation / seguro de vida simulation, "
     "borrower declaration, solvency assessment)\n\n"
+    "Important: the AT / Autoridade Tributaria e Aduaneira logo or portal chrome does "
+    "NOT by itself make a page an IRS document. A list of issued fatura-recibo is "
+    "income (Rendimentos); only an actual tax return, comprovativo de entrega or "
+    "nota de liquidacao is IRS. Likewise, a bank statement that merely lists the AT "
+    "as a direct-debit creditor is still Extratos Bancarios.\n\n"
     "Reply with ONLY the category name, nothing else."
 )
 
@@ -635,15 +652,18 @@ CONTENT_RULES: Dict[str, List[str]] = {
         r"nota discriminativa.*atos clinicos", r"contrato de avenca",
     ],
     "IRS": [
-        # Portuguese IRS documents (born-digital PDFs from AT portal)
+        # Portuguese IRS documents (born-digital PDFs from AT portal).
+        # NOTE: the bare "Autoridade Tributaria e Aduaneira" letterhead is NOT a
+        # signal - it also shows up inside a bank statement's direct-debit
+        # authorisation table (the AT is the creditor for IUC/IMI debits), which
+        # used to drag whole CGD statements into IRS. Only phrases that belong to
+        # an actual tax return / assessment count.
         r"declaracao de rendimentos.*irs", r"modelo.?3",
         r"comprovativo.*modelo.?3", r"comprovativo de entrega.*irs",
-        r"autoridade tributaria e aduaneira",
         r"nota de liquidacao", r"nota liquidacao",
-        # UK P60 header text — year-end tax summary, equivalent to Portuguese IRS
-        r"p60", r"end.of.year certificate", r"total for year",
-        # UK P45 — leaving employment tax form
-        r"p45", r"details of employee leaving",
+        # UK annual tax forms - equivalent to Portuguese IRS
+        r"p60", r"end.of.year certificate", r"total for year",
+        r"p45", r"details of employee leaving",
     ],
     "Documentos Pessoais": [
         # Utility bills (electricity/gas/water) double as comprovativo de morada
@@ -653,7 +673,11 @@ CONTENT_RULES: Dict[str, List[str]] = {
         # COMERCIAL" direct-debit *line* deep in its transaction table, which is
         # not the same as the document itself being an EDP bill.
         r"periodo de fatura", r"periodo de factura",
-        r"atestado.*incapacidade", r"atestado medico.*multiuso", r"grau de incapacidade",
+        # AMIM disability certificate. "grau de incapacidade" on its own is NOT
+        # enough: the blank Modelo 3 IRS form asks for it in Quadro 3, which used
+        # to file whole IRS declarations under Documentos Pessoais.
+        r"atestado.*incapacidade", r"atestado medico.*multiuso",
+        r"junta medica.*incapacidade", r"incapacidade multiuso",
         # English-language utility bills (UK address proofs)
         r"thames water", r"southern water", r"anglian water", r"severn trent",
         r"yorkshire water", r"united utilities", r"welsh water", r"wessex water",
@@ -688,10 +712,44 @@ _COMPILED_CONTENT_RULES: Dict[str, List] = {
 _CONTENT_HEADER_CHARS = 3000
 
 
-def categorize_by_content(text: str) -> Optional[str]:
+# Headings that name the tax document itself. They are only conclusive on the
+# document's FIRST page: dossiers are full of merged PDFs — a bank credit form, a
+# Mapa CRC or an address proof with an IRS declaration or assessment stapled behind
+# it — and finding one of these a few pages in would re-file the whole thing as IRS.
+FIRST_PAGE_IRS_MARKERS = [
+    # Quadro headings of the Modelo 3 declaration form
+    r"estado civil do sujeito passivo",
+    r"opcao pela tributacao conjunta",
+    # Nota de liquidação (IRS assessment)
+    r"demonstracao de liquidacao de irs",
+]
+_COMPILED_FIRST_PAGE_IRS_MARKERS = [re.compile(p, re.IGNORECASE) for p in FIRST_PAGE_IRS_MARKERS]
+
+
+def _extract_pdf_first_page(path: Path) -> str:
+    """Text layer of page 1 only — the part that says what the document IS."""
+    if path.suffix.lower() != ".pdf":
+        return ""
+    try:
+        import fitz
+        doc = fitz.open(str(path))
+        text = doc[0].get_text() if len(doc) else ""
+        doc.close()
+        return text
+    except Exception:
+        return ""
+
+
+def categorize_by_content(text: str, first_page: str = "") -> Optional[str]:
     if not text:
         return None
     norm = normalize_stem(text[:_CONTENT_HEADER_CHARS])
+
+    if first_page:
+        head = normalize_stem(first_page[:_CONTENT_HEADER_CHARS])
+        if any(pat.search(head) for pat in _COMPILED_FIRST_PAGE_IRS_MARKERS):
+            return "IRS"
+
     for category, patterns in _COMPILED_CONTENT_RULES.items():
         for pat in patterns:
             if pat.search(norm):
@@ -935,6 +993,176 @@ def _find_nifs(text: str) -> set:
     return set(NIF_RE.findall(text)) if text else set()
 
 
+# An individual Portuguese NIF starts with 1, 2 or 3; 5xx belongs to a company and
+# 6xx-9xx to other entities. Filtering on that keeps an employer's, a landlord's or
+# a bank's tax number out of an applicant's identity registry.
+PERSONAL_NIF_RE = re.compile(r'\b[123]\d{8}\b')
+
+# How far from a person's printed name a number still counts as *their* NIF.
+_NIF_NAME_WINDOW = 160
+
+# How far apart the two applicants' names can be printed and still count as a joint
+# identification block rather than two unrelated mentions on the same page.
+_JOINT_NAME_WINDOW = 400
+
+# A currency symbol or a two-decimal amount beside the names. Statements print the
+# holders in a plain addressee block, so money next to the pair means the match came
+# from the transaction table instead — a transfer between the two, not co-ownership.
+_MONEY_RE = re.compile(r'[€£$]|\d[.,]\d{2}(?!\d)')
+
+# Returned instead of a person name when a document belongs to BOTH applicants.
+SHARED_OWNER = "__SHARED__"
+
+# Categories where a single document can legitimately belong to both applicants: the
+# couple's one IRS declaration and liquidation note, and statements for accounts and
+# holdings they own together. A payslip, an employment contract, a Mapa CRC and an ID
+# card are the property of one person whatever else the page happens to mention.
+_JOINTABLE_CATEGORIES = {"IRS", "Extratos Bancários", "Património"}
+
+
+def _find_nifs_near_name(text: str, person_name: str) -> set:
+    """Personal NIFs printed within a short window of this person's own name."""
+    if not text:
+        return set()
+    norm = normalize_stem(text)
+    found: set = set()
+    for pat in _name_patterns(normalize_stem(person_name)):
+        for m in pat.finditer(norm):
+            seg = norm[max(0, m.start() - _NIF_NAME_WINDOW): m.end() + _NIF_NAME_WINDOW]
+            found |= set(PERSONAL_NIF_RE.findall(seg))
+    return found
+
+
+def _names_printed_together(text: str, person_names: List[str]) -> bool:
+    """
+    True when two applicants' names are printed close to one another — the joint
+    identification block of an IRS Modelo 3 (Quadro 3/5) or the two-holder header
+    of a shared account.
+
+    Callers pass the FIRST PAGE only, and that is what makes this safe. A statement's
+    transaction table is full of transfers naming the spouse ("TRF P/ VANESSA"), and
+    two such lines a few rows apart would otherwise read as a joint holder block.
+    Who a document belongs to is declared on its first page, never in its tables.
+    """
+    if not text or len(person_names) < 2:
+        return False
+    from itertools import combinations
+    norm = normalize_stem(text)
+    positions: Dict[str, List[int]] = {}
+    for name in person_names:
+        hits = sorted(m.start() for pat in _name_patterns(normalize_stem(name))
+                      for m in pat.finditer(norm))
+        if hits:
+            positions[name] = hits
+    if len(positions) < 2:
+        return False
+    for a, b in combinations(positions, 2):
+        for pa in positions[a]:
+            for pb in positions[b]:
+                if abs(pb - pa) > _JOINT_NAME_WINDOW:
+                    continue
+                lo, hi = min(pa, pb), max(pa, pb)
+                if _MONEY_RE.search(norm[max(0, lo - 60):hi + 20]):
+                    continue  # a transfer line ("ref: to Bruno & Elzbieta €3,094.85")
+                return True
+    return False
+
+
+CLIENT_CONFIG_NAME = ".kova.json"
+
+
+def load_client_config(client_folder: Path) -> Dict:
+    """
+    Optional per-client overrides, read from .kova.json at the client root.
+
+    Portuguese banks address a statement to the first holder alone, so nothing
+    printed on it says the account is held jointly. That one fact cannot be read
+    out of the documents and has to be stated once, here:
+
+        {"joint_accounts": ["PT50001800034342285602004", "0544.000251.100"],
+         "joint_files": ["ReciboVerde_2026-01_2026-08.png"]}
+
+    joint_accounts  IBANs or account numbers whose statements belong to both
+                    applicants; matched against the document text, ignoring
+                    spaces, dots and dashes.
+    joint_files     exact filenames to treat as joint, for one-off documents
+                    (including scans with no text layer).
+    """
+    path = client_folder / CLIENT_CONFIG_NAME
+    if not path.exists():
+        return {}
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, ValueError) as e:
+        print(f"    [config] ignoring unreadable {path.name}: {e}")
+        return {}
+
+
+def _flatten_account(value: str) -> str:
+    return re.sub(r"[\s.\-]", "", str(value)).lower()
+
+
+def _config_says_joint(path: Path, text: str, config: Dict) -> bool:
+    """Joint ownership declared in .kova.json rather than readable from the page."""
+    if not config:
+        return False
+    if path.name in set(config.get("joint_files") or []):
+        return True
+    accounts = [_flatten_account(a) for a in (config.get("joint_accounts") or [])]
+    if not accounts or not text:
+        return False
+    flat = _flatten_account(text)
+    return any(a and a in flat for a in accounts)
+
+
+def is_joint_document(path: Path, person_names: List[str],
+                      nif_registry: Dict[str, set],
+                      config: Optional[Dict] = None) -> bool:
+    """
+    True when the document belongs to BOTH applicants: a married couple's single
+    IRS declaration, its liquidation note, or a statement for an account they hold
+    together. Such a document belongs to the application as a whole and lives in
+    the client-root standard folder, not in one person's.
+    """
+    if len(person_names) < 2:
+        return False
+    text = _extract_pdf_text(path)
+    if _config_says_joint(path, text, config or {}):
+        return True
+    if not text:
+        return False
+    first_page = _extract_pdf_first_page(path)
+    if _names_printed_together(first_page, person_names):
+        return True
+    known = {p: nifs for p, nifs in nif_registry.items() if nifs}
+    if len(known) >= 2:
+        page_nifs = _find_nifs(first_page)
+        if sum(1 for nifs in known.values() if page_nifs & nifs) >= 2:
+            return True
+    return False
+
+
+def _strip_person_suffix(stem: str, person_names: List[str]) -> str:
+    """Drop trailing _Person parts from the name of a file that turned out to be joint."""
+    pats = [pat for name in person_names for pat in _name_patterns(normalize_stem(name))]
+    parts = stem.split("_")
+    while len(parts) > 1:
+        last = normalize_stem(parts[-1])
+        if last and any(pat.fullmatch(last) for pat in pats):
+            parts.pop()
+        else:
+            break
+    return "_".join(parts)
+
+
+def _recategorize(f: Path, current_category: str) -> str:
+    """Category a file should be in, judged from its text first and its name second."""
+    return (categorize_by_content(_extract_pdf_text(f), _extract_pdf_first_page(f))
+            or categorize_by_name(f.stem)
+            or current_category)
+
+
 def _match_person_in_text(text: str, person_names: List[str]) -> Optional[str]:
     """Search free-form document text for exactly one of the given person names."""
     if not text:
@@ -1007,18 +1235,25 @@ def _vision_identity(path: Path, ai_client) -> Tuple[Optional[str], Optional[str
 
 def build_nif_registry(subclients: List[Path], ai_client) -> Dict[str, set]:
     """
-    Collect known NIFs per sub-client from documents already filed under their name.
-    This is the ground truth later used to attribute ambiguous shared-root documents.
+    Work out each sub-client's own tax number from the documents already filed under
+    their name. This is the ground truth used later both to attribute an ambiguous
+    document to one applicant and to recognise a document that belongs to both.
+
+    Every readable document counts, and a candidate only qualifies if it is printed
+    next to that person's name. The applicant's own number then appears on nearly all
+    of their documents, while a landlord's, an employer's or a bank client number
+    appears on one or two — so the most frequent candidate wins. Precision matters
+    here: a polluted registry would make unrelated documents look jointly owned.
     """
     registry: Dict[str, set] = {sc.name: set() for sc in subclients}
     if len(subclients) < 2:
         return registry
 
-    # Documentos Pessoais (CC, certificates) almost always carry the NIF in plain text —
-    # check those first so we usually need zero vision calls to seed the registry.
-    scan_order = ["Documentos Pessoais", "IRS", "Rendimentos", "Extratos Bancários", "Mapa CRC"]
+    scan_order = ["Documentos Pessoais", "Mapa CRC", "IRS", "Rendimentos",
+                  "Extratos Bancários", "Património"]
     for sc in subclients:
-        vision_calls = 0
+        counts: Dict[str, int] = defaultdict(int)
+        unreadable: List[Path] = []
         for std in scan_order:
             folder = sc / std
             if not folder.exists():
@@ -1026,35 +1261,75 @@ def build_nif_registry(subclients: List[Path], ai_client) -> Dict[str, set]:
             for f in sorted(folder.iterdir()):
                 if not f.is_file() or f.suffix.lower() in SKIP_EXTENSIONS:
                     continue
-                nifs = _find_nifs(_extract_pdf_text(f))
-                if not nifs and ai_client and vision_calls < 3 and f.suffix.lower() in IMAGE_EXTS | {".pdf"}:
-                    _, nif = _vision_identity(f, ai_client)
-                    vision_calls += 1
-                    if nif:
-                        nifs = {nif}
-                registry[sc.name] |= nifs
-            if registry[sc.name]:
-                break  # enough ground truth for this person
+                text = _extract_pdf_text(f)
+                if not text.strip():
+                    if f.suffix.lower() in IMAGE_EXTS | {".pdf"}:
+                        unreadable.append(f)
+                    continue
+                for nif in _find_nifs_near_name(text, sc.name):
+                    counts[nif] += 1
+        if counts:
+            top = max(counts.values())
+            registry[sc.name] = {n for n, c in counts.items() if c == top}
+            continue
+        # Every document this person has is a scan or a photo — fall back to vision,
+        # capped at a few calls, and stop at the first number it manages to read.
+        if ai_client:
+            for f in unreadable[:3]:
+                _, nif = _vision_identity(f, ai_client)
+                if nif:
+                    registry[sc.name] = {nif}
+                    break
+
+    # A number that came out top for two different applicants identifies neither —
+    # usually a shared employer or a bank's own tax number. Dropping it matters most
+    # for the joint check, which would otherwise read every document as jointly owned.
+    shared = {n for a in registry for b in registry if a != b
+              for n in registry[a] & registry[b]}
+    for name in registry:
+        registry[name] -= shared
     return registry
 
 
 def identify_person_in_document(
-    path: Path, person_names: List[str], nif_registry: Dict[str, set], ai_client
+    path: Path, person_names: List[str], nif_registry: Dict[str, set], ai_client,
+    config: Optional[Dict] = None, category: Optional[str] = None
 ) -> Optional[str]:
     """
     Determine which person a document belongs to by reading its actual content —
     full name and/or NIF — and cross-referencing against the known registry.
     Text layer is tried first (free, reliable); vision is only a fallback for scans.
+    Returns SHARED_OWNER for a document that belongs to both applicants.
     """
     text = _extract_pdf_text(path)
+
+    if _config_says_joint(path, text, config or {}):
+        return SHARED_OWNER
+
+    # Both applicants named together on page 1 = a joint document; it stays at the
+    # client root. This has to come before the vision fallback below, which
+    # transcribes a single subject and would hand the couple's document to one of them.
+    first_page = _extract_pdf_first_page(path)
+    if _names_printed_together(first_page, person_names):
+        return SHARED_OWNER
 
     person = _match_person_in_text(text, person_names)
     if person:
         return person
 
     text_nifs = _find_nifs(text)
-    hits = [p for p, nifs in nif_registry.items() if text_nifs & nifs]
+    page_nifs = _find_nifs(first_page)
+    hits = [p for p, nifs in nif_registry.items() if nifs and (text_nifs & nifs)]
+    page_hits = [p for p, nifs in nif_registry.items() if nifs and (page_nifs & nifs)]
+    if len(page_hits) >= 2:
+        return SHARED_OWNER
     if len(hits) == 1:
+        # One applicant's number on an IRS return or an account statement only proves
+        # sole ownership if we know the other applicant's number and it is absent.
+        # Guessing here is exactly how a couple's joint declaration ends up filed
+        # under whichever of them we happened to identify first.
+        if category in _JOINTABLE_CATEGORIES and not all(nif_registry.get(n) for n in person_names):
+            return None
         return hits[0]
 
     if not ai_client:
@@ -1072,12 +1347,49 @@ def identify_person_in_document(
     return None
 
 
+def find_joint_docs_in_subclients(
+    client_folder: Path, subclients: List[Path], nif_registry: Dict[str, set],
+    config: Optional[Dict] = None
+) -> List[Dict]:
+    """
+    Pull documents that belong to both applicants out of a single applicant's folder.
+    A married couple files one IRS Modelo 3 and receives one nota de liquidacao for
+    the two of them; a jointly held account produces one statement. Whichever person
+    an earlier pass happened to pick, the document belongs to the application as a
+    whole, so it moves to the client-root standard folder — with its category
+    re-checked on the way out and the now-wrong _Person suffix dropped.
+    """
+    if len(subclients) < 2:
+        return []
+    moves = []
+    person_names = [sc.name for sc in subclients]
+    for sc in subclients:
+        for std in STANDARD_FOLDERS:
+            if std not in _JOINTABLE_CATEGORIES:
+                continue
+            folder = sc / std
+            if not folder.exists():
+                continue
+            for f in folder.iterdir():
+                if not f.is_file() or f.suffix.lower() in SKIP_EXTENSIONS:
+                    continue
+                if not is_joint_document(f, person_names, nif_registry, config):
+                    continue
+                category = _recategorize(f, std)
+                new_stem = _strip_person_suffix(f.stem, person_names)
+                target = client_folder / category / (new_stem + f.suffix)
+                if target.resolve() != f.resolve():
+                    moves.append({"from": str(f), "to": str(target)})
+    return moves
+
+
 def find_misrouted_files(
     client_folder: Path,
     subclients: List[Path],
     use_vision: bool = False,
     ai_client=None,
     nif_registry: Optional[Dict[str, set]] = None,
+    config: Optional[Dict] = None,
 ) -> List[Dict]:
     """
     Find files sitting in root standard folders that belong to a specific sub-client.
@@ -1101,6 +1413,14 @@ def find_misrouted_files(
         for f in std_folder.iterdir():
             if not f.is_file() or f.suffix.lower() in SKIP_EXTENSIONS:
                 continue
+
+            # 0. Joint documents belong to the application, not to one applicant —
+            # and their filename often still carries a stale _Person suffix from an
+            # earlier run, so this has to be checked before the filename match.
+            if (len(subclients) >= 2 and std in _JOINTABLE_CATEGORIES
+                    and is_joint_document(f, person_names, nif_registry, config)):
+                continue
+
             stem_norm = normalize_stem(f.stem)
 
             # 1. Filename match
@@ -1115,9 +1435,10 @@ def find_misrouted_files(
             if matched is None and len(subclients) >= 2 and std in _PERSONAL_CATEGORIES:
                 if f.suffix.lower() in IMAGE_EXTS | {".pdf"}:
                     person_name = identify_person_in_document(
-                        f, person_names, nif_registry, ai_client if use_vision else None
+                        f, person_names, nif_registry,
+                        ai_client if use_vision else None, config, std
                     )
-                    if person_name:
+                    if person_name and person_name != SHARED_OWNER:
                         print(f"    [identify] {f.name}  ->  {person_name}")
                         matched = next((sc for sc in subclients if sc.name == person_name), None)
 
@@ -1148,9 +1469,7 @@ def find_miscategorized_files(client_folder: Path, subclients: List[Path]) -> Li
                 # Content wins over filename here: a filename can be wrong in a way
                 # that still happens to match its (wrong) current folder's own rules
                 # (e.g. an avença invoice previously misnamed "NotaLiq_IRS_...").
-                new_category = categorize_by_content(_extract_pdf_text(f))
-                if new_category is None:
-                    new_category = categorize_by_name(f.stem)
+                new_category = _recategorize(f, std)
                 if new_category and new_category != std:
                     target = base / new_category / f.name
                     if target.resolve() != f.resolve():
@@ -1230,6 +1549,8 @@ def scan_client(
         if not target.exists():
             plan["new_folders"].append(str(target))
 
+    config = load_client_config(client_folder)
+
     # Build full sub-client list: existing folders + auto-detected person names
     existing_subclients = _get_subclient_folders(client_folder)
     existing_lower = {sc.name.lower() for sc in existing_subclients}
@@ -1273,6 +1594,18 @@ def scan_client(
         if category is None:
             category = "Documentos Pessoais"  # safe fallback for image groups
 
+        # Route shared-root personal scans (e.g. a CC photographed as front+back
+        # images) to the right sub-client, same as the single-file path below —
+        # otherwise a merged ID card always lands at the shared couple root.
+        if (category in _PERSONAL_CATEGORIES and base_folder == client_folder
+                and len(all_subclients) >= 2):
+            person = identify_person_in_document(
+                images[0], person_names, nif_registry, ai_client if use_vision else None
+            )
+            if person:
+                print(f"    [identify] {group_key} (merged)  ->  {person}")
+                base_folder = next(sc for sc in all_subclients if sc.name == person)
+
         output = base_folder / category / (group_key + ".pdf")
         plan["merges"].append({
             "images": [str(p) for p in images],
@@ -1301,18 +1634,37 @@ def scan_client(
                 if vision_category:
                     category = vision_category
         else:
-            content_category = categorize_by_content(_extract_pdf_text(file_path))
-            # Content wins over filename: a filename can be wrong (legacy misnamed
-            # file, or a real document with a generic/misleading name) in a way
-            # that still happens to match a category's filename rule. The content
-            # rules only cover a few high-confidence, header-scoped signals (see
-            # categorize_by_content), so this can only override into Rendimentos/
-            # Documentos Pessoais/Património — never an arbitrary category.
-            category = content_category if content_category else name_category
+            pdf_text = _extract_pdf_text(file_path)
+            if pdf_text.strip():
+                content_category = categorize_by_content(
+                    pdf_text, _extract_pdf_first_page(file_path))
+                # Content wins over filename: a filename can be wrong (legacy misnamed
+                # file, or a real document with a generic/misleading name) in a way
+                # that still happens to match a category's filename rule. The content
+                # rules only cover a few high-confidence, header-scoped signals (see
+                # categorize_by_content), so this can only override into Rendimentos/
+                # Documentos Pessoais/Património — never an arbitrary category.
+                category = content_category if content_category else name_category
 
-            if category is None and use_vision and ai_client and ext == ".pdf":
-                print(f"    [vision] {file_path.name}")
-                category = categorize_by_vision(file_path, ai_client)
+                if category is None and use_vision and ai_client and ext == ".pdf":
+                    print(f"    [vision] {file_path.name}")
+                    category = categorize_by_vision(file_path, ai_client)
+            else:
+                # No text layer means this PDF is a scan/photo (e.g. a phone photo of a
+                # multi-page deed saved straight to PDF) — exactly as unreliable as a
+                # loose image file, since there's no body text to cross-check the
+                # filename against. Run vision alongside the filename check rather than
+                # only when it fails, and let vision win on disagreement, same as the
+                # image-file branch above. Without this, a scanned document whose
+                # filename happens to match an existing category prefix (e.g. a house
+                # deed mistakenly saved as "DeclaracaoMutuarios.pdf") never gets a
+                # vision check at all.
+                category = name_category
+                if use_vision and ai_client and ext == ".pdf":
+                    print(f"    [vision] {file_path.name}")
+                    vision_category = categorize_by_vision(file_path, ai_client)
+                    if vision_category:
+                        category = vision_category
 
         if category is None:
             plan["uncategorized"].append({
@@ -1332,9 +1684,12 @@ def scan_client(
         if (category in _PERSONAL_CATEGORIES and base_folder == client_folder
                 and len(all_subclients) >= 2):
             person = identify_person_in_document(
-                file_path, person_names, nif_registry, ai_client if use_vision else None
+                file_path, person_names, nif_registry,
+                ai_client if use_vision else None, config, category
             )
-            if person:
+            if person == SHARED_OWNER:
+                print(f"    [identify] {file_path.name}  ->  both applicants (stays at root)")
+            elif person:
                 print(f"    [identify] {file_path.name}  ->  {person}")
                 base_folder = next(sc for sc in all_subclients if sc.name == person)
 
@@ -1348,21 +1703,36 @@ def scan_client(
     # The passes below re-scan every file already filed in a standard folder —
     # skip them in --new-only mode, which only wants to touch newly added loose files.
     if not new_only:
+        # The passes below can each have an opinion about the same file. The first
+        # one to claim it wins, so they run most-specific first and a file already
+        # scheduled to move is never queued a second time.
+        planned_sources = {m["from"] for m in plan["moves"]}
+
+        def _queue(new_moves: List[Dict]) -> None:
+            for m in new_moves:
+                if m["from"] in planned_sources:
+                    continue
+                planned_sources.add(m["from"])
+                plan["moves"].append(m)
+
+        # Return documents that belong to both applicants (the couple's single IRS
+        # declaration and liquidation note, a joint account statement) to the client
+        # root, correcting their category and dropping the stale _Person suffix
+        _queue(find_joint_docs_in_subclients(client_folder, all_subclients,
+                                             nif_registry, config))
+
         # Fix files already filed under the wrong standard folder (e.g. a payslip or
         # avença invoice that was mistakenly classified as IRS in an earlier run)
-        for m in find_miscategorized_files(client_folder, all_subclients):
-            plan["moves"].append(m)
+        _queue(find_miscategorized_files(client_folder, all_subclients))
 
         # Pull any files out of a per-person Imóvel/Proposta Crédito/RGPD folder —
         # those categories are always shared at the client root
-        for m in find_shared_category_leaks(client_folder, all_subclients):
-            plan["moves"].append(m)
+        _queue(find_shared_category_leaks(client_folder, all_subclients))
 
         # Migrate files from root standard folders to per-sub-client folders
-        for m in find_misrouted_files(client_folder, all_subclients,
-                                       use_vision=use_vision, ai_client=ai_client,
-                                       nif_registry=nif_registry):
-            plan["moves"].append(m)
+        _queue(find_misrouted_files(client_folder, all_subclients,
+                                    use_vision=use_vision, ai_client=ai_client,
+                                    nif_registry=nif_registry, config=config))
 
         # Also merge image groups that are already inside standard subfolders
         for mg in find_inplace_image_merges(client_folder, all_subclients):
@@ -1733,8 +2103,10 @@ def apply_plan(plans: List[Dict], use_vision: bool = False, ai_client=None, new_
             if name.lower() not in {sc.name.lower() for sc in subclient_paths}
         ]
         if all_sc and not new_only:
+            client_config = load_client_config(Path(p["client_folder"]))
             for extra_move in find_misrouted_files(Path(p["client_folder"]), all_sc,
-                                                     use_vision=use_vision, ai_client=ai_client):
+                                                     use_vision=use_vision, ai_client=ai_client,
+                                                     config=client_config):
                 src = Path(extra_move["from"])
                 dst = Path(extra_move["to"])
                 if not src.exists() or dst.exists():
