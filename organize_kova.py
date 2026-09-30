@@ -61,6 +61,12 @@ try:
 except ImportError:
     HAS_ANTHROPIC = False
 
+try:
+    import pytesseract as _pytesseract
+    HAS_PYTESSERACT = True
+except ImportError:
+    HAS_PYTESSERACT = False
+
 # ─── Configuration ─────────────────────────────────────────────────────────
 
 BASE_DIR = Path(r"C:\Users\anton\Desktop\Kova Finance")
@@ -196,7 +202,7 @@ def _get_subclient_folders(client_folder: Path) -> List[Path]:
 SKIP_NAMES = {".claude", ".git", "standby", "despesas valencia", "nova pasta", "_claude_review", "webapp", "__pycache__", "kova-app", "simulacoes teste"}
 
 # File extensions to skip entirely
-SKIP_EXTENSIONS = {".action", ".json", ".xlsx", ".xls", ".docx", ".doc"}
+SKIP_EXTENSIONS = {".action", ".json", ".xlsx", ".xls", ".docx", ".doc", ".sqlite"}
 
 IMAGE_EXTS = {".jpg", ".jpeg", ".png"}
 
@@ -427,7 +433,7 @@ def generate_standard_name(path: Path, category: str, person: Optional[str], ai_
         f"Person: {person}" if person
         else "Person: UNKNOWN — do NOT guess or include any name (even a partial one) in the filename."
     )
-    full_text = _extract_pdf_text(path) if ext_lower == ".pdf" else ""
+    full_text = document_text(path, ai_client)
     text_context = full_text[:4000].strip() if full_text else "(no text layer — image scan)"
     prompt = RENAME_PROMPT.format(
         category=category,
@@ -871,8 +877,27 @@ def _upright_rotation(path: Path, im, ai_client) -> int:
         return _ORIENTATION_CACHE[key]
     rot = 0
     try:
-        ratio = _line_banding_ratio(im) if ai_client else 1.0
-        if ratio < _UPRIGHT_RATIO_MIN:
+        ratio = _line_banding_ratio(im) if (ai_client or ocr_available()) else 1.0
+
+        if ratio >= _UPRIGHT_RATIO_MIN:
+            # Text already runs across the page, so at worst it is upside down.
+            if ocr_available() and _osd_says_upside_down(im):
+                print(f"    [orient] {path.name}  reading it rotated 180deg")
+                _ORIENTATION_CACHE[key] = 180
+                return 180
+            _ORIENTATION_CACHE[key] = 0
+            return 0
+
+        # Text runs down the page. Reading it both ways settles which quarter turn,
+        # and the model is only asked when there is no OCR to read it with.
+        if ocr_available():
+            turn = _ocr_pick_quarter_turn(im)
+            if turn:
+                print(f"    [orient] {path.name}  reading it rotated {turn}deg (ocr)")
+                _ORIENTATION_CACHE[key] = turn
+                return turn
+
+        if ai_client:
             quarter = 90 if _ask_which_upright(im.rotate(90, expand=True),
                                                im.rotate(270, expand=True), ai_client) == "A" else 270
             # Near the threshold, leaving the page alone is the default: the turned
@@ -885,6 +910,284 @@ def _upright_rotation(path: Path, im, ai_client) -> int:
         print(f"    [orient] {path.name}: {e}")
     _ORIENTATION_CACHE[key] = rot
     return rot
+
+
+# ─── OCR (optional) ────────────────────────────────────────────────────────
+# Tesseract is a system install rather than a Python package, so every use of it
+# here is optional: without it the organizer behaves exactly as it did before.
+#
+# It does two jobs, and deliberately not a third. It settles which way up a page
+# is, by reading it each way round and keeping whichever yields real words, so the
+# question no longer goes to the model. And it gives a text layer to scans and
+# photos, which until now arrived with none — so the content rules, the tax-number
+# registry and the joint-document check simply did not apply to them.
+#
+# It does NOT get a say in re-filing a document that is already filed. OCR text is
+# noisier than a real text layer, and a wrong reading there would move a document
+# a human had already put in the right place.
+
+# Dossiers arrive in Portuguese, and foreign applicants bring French and English
+# ones. Whichever of these Tesseract actually has installed is what gets used.
+OCR_WANTED_LANGS = os.environ.get("KOVA_OCR_LANGS", "por+fra+eng")
+OCR_LANGS = "eng"          # narrowed to what is installed by ocr_available()
+
+# The Windows installer only ships English unless it is run with administrator
+# rights, so extra language files are looked for in a user-writable directory too.
+OCR_TESSDATA_DIR = os.environ.get("KOVA_TESSDATA") or str(
+    Path(os.environ.get("LOCALAPPDATA", "")) / "Kova-Tesseract" / "tessdata")
+OCR_DPI = 200
+# Everything read out of OCR text — the letterhead checks, the header rules, the
+# names and tax numbers, the words handed to the renamer — comes from the opening
+# pages. Reading a whole 13-page scanned contract costs minutes and adds nothing.
+OCR_MAX_PAGES = 2
+
+# Tesseract gains nothing from a 12-megapixel phone photo and takes noticeably
+# longer over one. Shrinking further than this starts losing small print.
+OCR_MAX_PIXELS = 2200
+_OCR_MIN_CHARS = 40        # under this the result is speckle, not text
+_OCR_MIN_OSD_CONF = 2.0    # tesseract's own confidence in the orientation it reports
+_OCR_ORIENT_MARGIN = 1.25  # how much more readable a turn must be before it is used
+
+OCR_CACHE_PATH = BASE_DIR / ".ocr_cache.sqlite"
+
+_OCR_ENABLED = True        # cleared by --no-ocr
+_OCR_READY: Optional[bool] = None
+
+
+def disable_ocr() -> None:
+    global _OCR_ENABLED
+    _OCR_ENABLED = False
+
+
+def ocr_available() -> bool:
+    """True when Tesseract can actually be called. Resolved once per run."""
+    global _OCR_READY, OCR_LANGS
+    if not _OCR_ENABLED or not HAS_PYTESSERACT or not HAS_PIL:
+        return False
+    if _OCR_READY is not None:
+        return _OCR_READY
+    exe = shutil.which("tesseract")
+    if not exe:
+        for candidate in (
+            Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "Tesseract-OCR" / "tesseract.exe",
+            Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")) / "Tesseract-OCR" / "tesseract.exe",
+            Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Tesseract-OCR" / "tesseract.exe",
+        ):
+            if candidate.is_file():
+                exe = str(candidate)
+                break
+    if not exe:
+        _OCR_READY = False
+        return False
+    # Point Tesseract at the extra language data through its own environment
+    # variable. Passing --tessdata-dir instead would break on any path containing
+    # a space, because pytesseract splits a config string on whitespace.
+    if OCR_TESSDATA_DIR and Path(OCR_TESSDATA_DIR).is_dir():
+        os.environ["TESSDATA_PREFIX"] = OCR_TESSDATA_DIR
+    try:
+        _pytesseract.pytesseract.tesseract_cmd = exe
+        _pytesseract.get_tesseract_version()
+        installed = set(_pytesseract.get_languages())
+        wanted = [l for l in OCR_WANTED_LANGS.split("+") if l in installed]
+        if not wanted:
+            print(f"    [ocr] no usable language data for {OCR_WANTED_LANGS}")
+            _OCR_READY = False
+            return False
+        OCR_LANGS = "+".join(wanted)
+        _OCR_READY = True
+    except Exception as e:
+        print(f"    [ocr] Tesseract found at {exe} but unusable: {e}")
+        _OCR_READY = False
+    return _OCR_READY
+
+
+def _ocr_cache_get(key: str) -> Optional[str]:
+    try:
+        with sqlite3.connect(OCR_CACHE_PATH) as con:
+            con.execute("CREATE TABLE IF NOT EXISTS ocr (k TEXT PRIMARY KEY, text TEXT)")
+            row = con.execute("SELECT text FROM ocr WHERE k=?", (key,)).fetchone()
+            return row[0] if row else None
+    except sqlite3.Error:
+        return None
+
+
+def _ocr_cache_put(key: str, text: str) -> None:
+    try:
+        with sqlite3.connect(OCR_CACHE_PATH) as con:
+            con.execute("CREATE TABLE IF NOT EXISTS ocr (k TEXT PRIMARY KEY, text TEXT)")
+            con.execute("INSERT OR REPLACE INTO ocr (k, text) VALUES (?, ?)", (key, text))
+    except sqlite3.Error:
+        pass
+
+
+def _ocr_read(im) -> str:
+    """Text of one already-upright page image."""
+    try:
+        page = im.convert("RGB")
+        if max(page.size) > OCR_MAX_PIXELS:
+            page = page.copy()
+            page.thumbnail((OCR_MAX_PIXELS, OCR_MAX_PIXELS))
+        return _pytesseract.image_to_string(page, lang=OCR_LANGS) or ""
+    except Exception as e:
+        print(f"    [ocr] read failed: {e}")
+        return ""
+
+
+def _osd_says_upside_down(im) -> bool:
+    """
+    Whether Tesseract reckons this page is turned through half a circle. That is the
+    one case no measurement of line direction can see, since upside-down text still
+    runs across the page. Only the half turn is taken from Tesseract: the sign of the
+    angle it reports is a convention, and trusting it stood a citizen's card on its
+    head, so the quarter turns are settled by reading the page instead.
+    """
+    try:
+        from pytesseract import Output
+        osd = _pytesseract.image_to_osd(im, output_type=Output.DICT)
+    except Exception:
+        return False                     # too little text to judge, or no osd data
+    if float(osd.get("orientation_conf") or 0) < _OCR_MIN_OSD_CONF:
+        return False
+    if int(osd.get("rotate") or 0) % 360 != 180:
+        return False
+    # Confirm by reading: turning a page that was the right way up would be worse
+    # than leaving a rare upside-down one alone.
+    upside_down = _ocr_legibility(im.rotate(180, expand=True))
+    return upside_down > _ocr_legibility(im) * _OCR_ORIENT_MARGIN
+
+
+def _ocr_legibility(im) -> float:
+    """How much readable text Tesseract finds, weighted by its own confidence."""
+    try:
+        from pytesseract import Output
+        t = im.convert("RGB")
+        t.thumbnail((OCR_MAX_PIXELS, OCR_MAX_PIXELS))
+        data = _pytesseract.image_to_data(t, lang=OCR_LANGS, output_type=Output.DICT)
+    except Exception:
+        return 0.0
+    score = 0.0
+    for word, conf in zip(data.get("text", []), data.get("conf", [])):
+        try:
+            c = float(conf)
+        except (TypeError, ValueError):
+            continue
+        if c > 0 and word and word.strip():
+            score += c * len(word.strip())
+    return score
+
+
+def _ocr_pick_quarter_turn(im) -> Optional[int]:
+    """
+    Which quarter turn stands a sideways page up, decided by reading it both ways.
+    Orientation detection gives up on pages with few characters — a photographed
+    form in a large frame, an ID card — and this still works there, without a
+    vision call. A clear winner is required so a page of noise changes nothing.
+    """
+    scores = {r: _ocr_legibility(im.rotate(r, expand=True)) for r in (90, 270)}
+    best, other = sorted(scores, key=lambda r: scores[r], reverse=True)
+    if scores[best] <= 0 or scores[best] < scores[other] * _OCR_ORIENT_MARGIN:
+        return None
+    return best
+
+
+# A photographed document is often pasted into a PDF at a fraction of the page, and
+# rendering that page at a fixed resolution throws the detail away: an identity card
+# sitting a third of the way across an A4 sheet came back as nothing at all. Pulling
+# the embedded picture out at the size it was actually stored recovers it.
+_OCR_MIN_EMBEDDED_PX = 400
+_OCR_MAX_EMBEDDED = 4
+
+
+def _pdf_page_images(doc, index: int) -> List:
+    """Pictures embedded in a page, at their stored resolution."""
+    import fitz
+    out = []
+    try:
+        infos = doc[index].get_images(full=True)
+    except Exception:
+        return []
+    if not infos or len(infos) > _OCR_MAX_EMBEDDED:
+        return []
+    for info in infos:
+        try:
+            pix = fitz.Pixmap(doc, info[0])
+            if pix.n - pix.alpha > 3:              # CMYK and friends
+                pix = fitz.Pixmap(fitz.csRGB, pix)
+            im = PilImage.open(io.BytesIO(pix.tobytes("png"))).convert("RGB")
+        except Exception:
+            continue
+        if max(im.size) >= _OCR_MIN_EMBEDDED_PX:
+            out.append(im)
+    return out
+
+
+def _document_pages(path: Path, ai_client, max_pages: int = OCR_MAX_PAGES) -> List:
+    """Upright page images for OCR. First page only when max_pages is 1."""
+    from PIL import ImageOps
+    pages = []
+    ext = path.suffix.lower()
+    try:
+        if ext == ".pdf":
+            import fitz
+            doc = fitz.open(str(path))
+            for i in range(min(len(doc), max_pages)):
+                embedded = _pdf_page_images(doc, i)
+                if embedded:
+                    pages.extend(embedded)
+                else:
+                    raw = doc[i].get_pixmap(dpi=OCR_DPI).tobytes("png")
+                    pages.append(PilImage.open(io.BytesIO(raw)))
+            doc.close()
+        elif ext in IMAGE_EXTS:
+            pages.append(ImageOps.exif_transpose(PilImage.open(path)))
+        else:
+            return []
+    except Exception as e:
+        print(f"    [ocr] cannot render {path.name}: {e}")
+        return []
+    if not pages:
+        return []
+    # One orientation decision for the whole document, taken on its first page.
+    rot = _upright_rotation(path, pages[0], ai_client)
+    if rot:
+        pages = [im.rotate(rot, expand=True) for im in pages]
+    return pages
+
+
+def ocr_document_text(path: Path, ai_client=None, first_page_only: bool = False) -> str:
+    """
+    OCR text for a scan or photo, cached by file content so a second run is free.
+    Returns "" when OCR is unavailable or the page yields nothing worth reading.
+    """
+    if not ocr_available():
+        return ""
+    try:
+        key = f"{file_md5(path)}:{'p1' if first_page_only else 'all'}:{OCR_LANGS}"
+    except (OSError, PermissionError):
+        return ""
+    cached = _ocr_cache_get(key)
+    if cached is not None:
+        return cached
+    pages = _document_pages(path, ai_client, max_pages=1 if first_page_only else OCR_MAX_PAGES)
+    text = "\n".join(_ocr_read(im) for im in pages).strip()
+    if len(text) < _OCR_MIN_CHARS:
+        text = ""
+    else:
+        print(f"    [ocr] read {path.name} ({len(text)} chars)")
+    _ocr_cache_put(key, text)
+    return text
+
+
+def document_text(path: Path, ai_client=None) -> str:
+    """A document's text: its real layer when it has one, otherwise OCR."""
+    text = _extract_pdf_text(path)
+    return text if text.strip() else ocr_document_text(path, ai_client)
+
+
+def document_first_page_text(path: Path, ai_client=None) -> str:
+    """First page text: real layer when there is one, otherwise OCR of page 1."""
+    text = _extract_pdf_first_page(path)
+    return text if text.strip() else ocr_document_text(path, ai_client, first_page_only=True)
 
 
 def _vision_image(path: Path, ai_client, dpi: int = 120) -> Tuple[Optional[str], Optional[str]]:
@@ -1242,12 +1545,12 @@ def is_joint_document(path: Path, person_names: List[str],
     """
     if len(person_names) < 2:
         return False
-    text = _extract_pdf_text(path)
+    text = document_text(path)
     if _config_says_joint(path, text, config or {}):
         return True
     if not text:
         return False
-    first_page = _extract_pdf_first_page(path)
+    first_page = document_first_page_text(path)
     if _names_printed_together(first_page, person_names):
         return True
     known = {p: nifs for p, nifs in nif_registry.items() if nifs}
@@ -1357,7 +1660,7 @@ def build_nif_registry(subclients: List[Path], ai_client) -> Dict[str, set]:
             for f in sorted(folder.iterdir()):
                 if not f.is_file() or f.suffix.lower() in SKIP_EXTENSIONS:
                     continue
-                text = _extract_pdf_text(f)
+                text = document_text(f, ai_client)
                 if not text.strip():
                     if f.suffix.lower() in IMAGE_EXTS | {".pdf"}:
                         unreadable.append(f)
@@ -1397,7 +1700,7 @@ def identify_person_in_document(
     Text layer is tried first (free, reliable); vision is only a fallback for scans.
     Returns SHARED_OWNER for a document that belongs to both applicants.
     """
-    text = _extract_pdf_text(path)
+    text = document_text(path, ai_client)
 
     if _config_says_joint(path, text, config or {}):
         return SHARED_OWNER
@@ -1405,7 +1708,7 @@ def identify_person_in_document(
     # Both applicants named together on page 1 = a joint document; it stays at the
     # client root. This has to come before the vision fallback below, which
     # transcribes a single subject and would hand the couple's document to one of them.
-    first_page = _extract_pdf_first_page(path)
+    first_page = document_first_page_text(path, ai_client)
     if _names_printed_together(first_page, person_names):
         return SHARED_OWNER
 
@@ -1729,6 +2032,10 @@ def scan_client(
                 vision_category = categorize_by_vision(file_path, ai_client)
                 if vision_category:
                     category = vision_category
+            if category is None:
+                category = categorize_by_content(
+                    ocr_document_text(file_path, ai_client if use_vision else None),
+                    document_first_page_text(file_path, ai_client if use_vision else None))
         else:
             pdf_text = _extract_pdf_text(file_path)
             if pdf_text.strip():
@@ -1761,6 +2068,10 @@ def scan_client(
                     vision_category = categorize_by_vision(file_path, ai_client)
                     if vision_category:
                         category = vision_category
+                if category is None:
+                    category = categorize_by_content(
+                        ocr_document_text(file_path, ai_client if use_vision else None),
+                        document_first_page_text(file_path, ai_client if use_vision else None))
 
         if category is None:
             plan["uncategorized"].append({
@@ -2417,6 +2728,7 @@ def main() -> None:
     parser.add_argument("--client",                  metavar="NAME",      help="Process only this client folder")
     parser.add_argument("--new-only",                action="store_true", help="Only categorize/move newly added loose files — skip re-scanning already-organized folders")
     parser.add_argument("--skip-vision",             action="store_true", help="Skip AI vision for unrecognised images")
+    parser.add_argument("--no-ocr",                  action="store_true", help="Do not OCR scans even if Tesseract is installed")
     parser.add_argument("--standby",                 action="store_true", help="Also process the Standby folder")
     parser.add_argument("--api-key",                 metavar="KEY",       help="Anthropic API key (overrides ANTHROPIC_API_KEY env var)")
     parser.add_argument("--claude-mode",             action="store_true", help="Render previews of uncategorized files + write claude_review.json")
@@ -2471,6 +2783,17 @@ def main() -> None:
         print(f"Vision: enabled (model: {VISION_MODEL})")
     else:
         print("Vision: disabled")
+
+    if args.no_ocr:
+        disable_ocr()
+    if ocr_available():
+        print(f"OCR: enabled ({OCR_LANGS})")
+    elif args.no_ocr:
+        print("OCR: disabled (--no-ocr)")
+    elif not HAS_PYTESSERACT:
+        print("OCR: unavailable (pip install pytesseract, plus the Tesseract program)")
+    else:
+        print("OCR: unavailable (Tesseract program not found)")
 
     plans: List[Dict] = []
     for folder in client_folders:

@@ -48,6 +48,7 @@ webapp/.secret_key
 organize_plan.json
 claude_review.json
 claude_categorizations.json
+.ocr_cache.sqlite
 
 # Python
 __pycache__/
