@@ -29,6 +29,7 @@ Requirements:
     ANTHROPIC_API_KEY must be set in environment (or use --api-key) for --apply vision mode
 """
 
+import io
 import os
 import re
 import sys
@@ -224,7 +225,7 @@ CATEGORY_RULES: Dict[str, List[str]] = {
         r"^ContaPoupanca_", r"^CertificadoTesouro_", r"^CarteiraInvestimento_",
     ],
     "IRS": [
-        r"^IRS_", r"^NotaLiq_IRS_", r"^NotaLiq_", r"^IES_",
+        r"^IRS_", r"^NotaLiq_IRS_", r"^NotaLiq_", r"^IES_", r"^DeclImpot_",
         r"^ComprovativoIRS_", r"^DeclIRS_", r"^Modelo3_", r"^Reembolso_",
         r"^P60_", r"^P45_", r"^P11D_",
     ],
@@ -313,6 +314,8 @@ IRS:
   UK P60 end-of-year certificate →  P60_YYYY-YY_Person  (YYYY-YY = UK tax year, e.g. 2025-26)
   UK P45 leaving employment      →  P45_YYYY-MM_Person
   UK P11D benefits in kind       →  P11D_YYYY-YY_Person
+  Swiss cantonal tax return / quittance de declaration d'impot
+                                 →  DeclImpot_YYYY_Person  (YYYY = periode fiscale)
 
 Documentos Pessoais:
   ID card (cartão cidadão/CC)   →  CC_Person
@@ -416,27 +419,8 @@ def generate_standard_name(path: Path, category: str, person: Optional[str], ai_
     ext = path.suffix          # preserve original extension (including case)
     ext_lower = ext.lower()
 
-    # Render first page to JPEG
-    b64 = media_type = None
-    if ext_lower == ".pdf":
-        try:
-            import fitz
-            doc = fitz.open(str(path))
-            pix = doc[0].get_pixmap(dpi=100)
-            b64 = base64.standard_b64encode(pix.tobytes("jpeg")).decode()
-            media_type = "image/jpeg"
-            doc.close()
-        except Exception as e:
-            print(f"    [rename] PDF render error {path.name}: {e}")
-            return None
-    elif ext_lower in IMAGE_EXTS:
-        media_type = "image/png" if ext_lower == ".png" else "image/jpeg"
-        try:
-            with open(path, "rb") as f:
-                b64 = base64.standard_b64encode(f.read()).decode()
-        except Exception:
-            return None
-    else:
+    b64, media_type = _vision_image(path, ai_client, dpi=100)
+    if not b64:
         return None
 
     person_line = (
@@ -509,6 +493,9 @@ NORMALIZED_RULES: Dict[str, List[str]] = {
     "IRS": [
         r"^irs( |\+|$)", r"nota de liquidac", r"nota liquidac",
         r"^dipf", r"declaracao.*irs", r"attestation.*impots",
+        # Swiss / French-language tax returns — the equivalent of the Portuguese IRS
+        r"declaration d.impot", r"declaracao.*rendimentos.*sui", r"avis de taxation",
+        r"^declimpot", r"vaudtax", r"taxation.*(vaud|geneve|canton)",
         r"informederendimentosfinanceiros", r"declar.*ano.*ex",
         r"^comprovativo ir[_\s]",  # Brazilian IR (income tax) proof
         r"modelo.?3", r"comprovativo.*modelo",
@@ -592,7 +579,9 @@ VISION_PROMPT = (
     "investment or brokerage account statement — stocks, funds, bonds; NOT a checking-account "
     "statement even if it looks similar)\n"
     "- IRS (tax return declaration, IRS liquidation note NotaLiquidacao, IES annual report, "
-    "or UK annual tax forms: P60 end-of-year certificate, P45 leaving employment)\n"
+    "UK annual tax forms: P60 end-of-year certificate, P45 leaving employment, "
+    "or a Swiss/French cantonal tax return - declaration d'impot, quittance or avis "
+    "de taxation from an Administration cantonale des impots)\n"
     "- Imóvel (CPCV purchase promise, property certificate CertidaoPredial, "
     "land register Caderneta Predial, energy certificate, usage licence, "
     "lease/rental contract, property plans or drawings)\n"
@@ -716,6 +705,18 @@ _CONTENT_HEADER_CHARS = 3000
 # document's FIRST page: dossiers are full of merged PDFs — a bank credit form, a
 # Mapa CRC or an address proof with an IRS declaration or assessment stapled behind
 # it — and finding one of these a few pages in would re-file the whole thing as IRS.
+# Phrases that only identify the document when they sit in its letterhead, at the
+# very top of page 1. A Swiss bank statement names the cantonal tax office too, as
+# the payee of a quarterly tax instalment, part-way down the transaction table.
+_LETTERHEAD_CHARS = 400
+
+LETTERHEAD_IRS_MARKERS = [
+    r"administration cantonale des impots",
+    r"declaration d.impot",
+    r"avis de taxation",
+]
+_COMPILED_LETTERHEAD_IRS_MARKERS = [re.compile(p, re.IGNORECASE) for p in LETTERHEAD_IRS_MARKERS]
+
 FIRST_PAGE_IRS_MARKERS = [
     # Quadro headings of the Modelo 3 declaration form
     r"estado civil do sujeito passivo",
@@ -746,6 +747,9 @@ def categorize_by_content(text: str, first_page: str = "") -> Optional[str]:
     norm = normalize_stem(text[:_CONTENT_HEADER_CHARS])
 
     if first_page:
+        letterhead = normalize_stem(first_page[:_LETTERHEAD_CHARS])
+        if any(pat.search(letterhead) for pat in _COMPILED_LETTERHEAD_IRS_MARKERS):
+            return "IRS"
         head = normalize_stem(first_page[:_CONTENT_HEADER_CHARS])
         if any(pat.search(head) for pat in _COMPILED_FIRST_PAGE_IRS_MARKERS):
             return "IRS"
@@ -790,30 +794,141 @@ def images_to_pdf(image_paths: List[Path], output_path: Path) -> bool:
     return False
 
 
-def categorize_by_vision(path: Path, client) -> Optional[str]:
-    """Ask Claude Haiku to classify a document by its first page (image or PDF)."""
-    ext = path.suffix.lower()
+# ─── Page orientation ──────────────────────────────────────────────────────
+# Phone photos of documents are routinely saved sideways, and a sideways page
+# defeats the vision model outright: the back of a citizen's card came back
+# classified as a bank credit proposal, and the front yielded a date of birth
+# where its tax number should have been. Orientation is fixed before any vision
+# call rather than left for the model to reason about.
 
-    if ext == ".pdf":
-        try:
+_UPRIGHT_PAIR_PROMPT = (
+    "Two versions of the same document, A first then B. Exactly one of them has its "
+    "printed text upright and readable left-to-right; the other is sideways or upside "
+    "down. Reply with exactly one letter: A or B."
+)
+
+# Printed lines make consecutive image rows alternate dark and light, so upright text
+# varies far more down the page than across it, and a quarter-turned page is the
+# reverse. Over 25 born-digital pages the ratio never fell below 1.5 upright and never
+# rose above 0.7 once turned, so 0.8 separates them with room to spare. The ratio only
+# nominates a candidate; the model still has to confirm before anything is rotated.
+_UPRIGHT_RATIO_MIN = 0.8
+
+# Well under the turned pages' worst case of 0.7, and far from any upright page seen.
+# Below this the measurement is decisive, so only the direction is put to the model;
+# asking it to re-confirm as well just adds a call that can go the wrong way by chance.
+_UPRIGHT_RATIO_SURE = 0.55
+
+# Rotation decided per file, so repeated vision calls on one document agree and pay
+# for the orientation check once.
+_ORIENTATION_CACHE: Dict[str, int] = {}
+
+
+def _line_banding_ratio(im) -> float:
+    """Horizontal line structure over vertical. Above 1 the text reads across."""
+    import statistics
+    from PIL import ImageOps
+    g = ImageOps.grayscale(im.convert("RGB"))
+    g.thumbnail((600, 600))
+    w, h = g.size
+    if w < 8 or h < 8:
+        return 1.0
+    px = g.load()
+    rows = [sum(px[x, y] for x in range(w)) / w for y in range(h)]
+    cols = [sum(px[x, y] for y in range(h)) / h for x in range(w)]
+    dr = statistics.pstdev([rows[i + 1] - rows[i] for i in range(h - 1)]) or 1e-6
+    dc = statistics.pstdev([cols[i + 1] - cols[i] for i in range(w - 1)]) or 1e-6
+    return dr / dc
+
+
+def _encode_image(im, quality: int = 85) -> str:
+    buf = io.BytesIO()
+    im.convert("RGB").save(buf, "JPEG", quality=quality)
+    return base64.standard_b64encode(buf.getvalue()).decode()
+
+
+def _ask_which_upright(im_a, im_b, ai_client) -> str:
+    """Which of two candidate orientations reads upright. Comparing two pictures is
+    far steadier than asking for a rotation in the abstract, which confuses 90 with 270."""
+    def thumb(im):
+        t = im.copy()
+        t.thumbnail((760, 760))
+        return {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg",
+                                            "data": _encode_image(t, 80)}}
+    resp = ai_client.messages.create(
+        model=VISION_MODEL,
+        max_tokens=5,
+        messages=[{"role": "user", "content": [thumb(im_a), thumb(im_b),
+                                               {"type": "text", "text": _UPRIGHT_PAIR_PROMPT}]}],
+    )
+    return resp.content[0].text.strip().upper()[:1]
+
+
+def _upright_rotation(path: Path, im, ai_client) -> int:
+    """Degrees counter-clockwise needed to stand this page up. 0 when it already is."""
+    key = str(path)
+    if key in _ORIENTATION_CACHE:
+        return _ORIENTATION_CACHE[key]
+    rot = 0
+    try:
+        ratio = _line_banding_ratio(im) if ai_client else 1.0
+        if ratio < _UPRIGHT_RATIO_MIN:
+            quarter = 90 if _ask_which_upright(im.rotate(90, expand=True),
+                                               im.rotate(270, expand=True), ai_client) == "A" else 270
+            # Near the threshold, leaving the page alone is the default: the turned
+            # version has to beat the original before anything is rotated.
+            if (ratio < _UPRIGHT_RATIO_SURE
+                    or _ask_which_upright(im.rotate(quarter, expand=True), im, ai_client) == "A"):
+                rot = quarter
+                print(f"    [orient] {path.name}  reading it rotated {rot}deg")
+    except Exception as e:
+        print(f"    [orient] {path.name}: {e}")
+    _ORIENTATION_CACHE[key] = rot
+    return rot
+
+
+def _vision_image(path: Path, ai_client, dpi: int = 120) -> Tuple[Optional[str], Optional[str]]:
+    """First page of a document as base64 for a vision call, stood upright first.
+    Returns (base64, media_type), or (None, None) if it cannot be read."""
+    ext = path.suffix.lower()
+    try:
+        if ext == ".pdf":
             import fitz
             doc = fitz.open(str(path))
-            pix = doc[0].get_pixmap(dpi=120)
-            img_bytes = pix.tobytes("jpeg")
+            pix = doc[0].get_pixmap(dpi=dpi)
+            raw = pix.tobytes("jpeg")
             doc.close()
-            b64 = base64.standard_b64encode(img_bytes).decode()
             media_type = "image/jpeg"
-        except Exception as e:
-            print(f"    PDF render error for {path.name}: {e}")
-            return None
-    else:
-        media_type = "image/png" if ext == ".png" else "image/jpeg"
-        try:
+        elif ext in IMAGE_EXTS:
+            media_type = "image/png" if ext == ".png" else "image/jpeg"
             with open(path, "rb") as f:
-                b64 = base64.standard_b64encode(f.read()).decode()
-        except Exception as e:
-            print(f"    Read error for {path.name}: {e}")
-            return None
+                raw = f.read()
+        else:
+            return None, None
+    except Exception as e:
+        print(f"    Read error for {path.name}: {e}")
+        return None, None
+
+    if not HAS_PIL:
+        return base64.standard_b64encode(raw).decode(), media_type
+    try:
+        from PIL import ImageOps
+        im = PilImage.open(io.BytesIO(raw))
+        im = ImageOps.exif_transpose(im)      # honour a camera's own orientation tag
+        rot = _upright_rotation(path, im, ai_client)
+        if rot == 0:
+            return base64.standard_b64encode(raw).decode(), media_type
+        return _encode_image(im.rotate(rot, expand=True)), "image/jpeg"
+    except Exception as e:
+        print(f"    [orient] {path.name}: {e}")
+        return base64.standard_b64encode(raw).decode(), media_type
+
+
+def categorize_by_vision(path: Path, client) -> Optional[str]:
+    """Ask Claude Haiku to classify a document by its first page (image or PDF)."""
+    b64, media_type = _vision_image(path, client)
+    if not b64:
+        return None
 
     try:
         resp = client.messages.create(
@@ -1180,27 +1295,8 @@ def _match_person_in_text(text: str, person_names: List[str]) -> Optional[str]:
 def _vision_identity(path: Path, ai_client) -> Tuple[Optional[str], Optional[str]]:
     """Ask Claude to transcribe the document subject's name + NIF (not pick a person —
     transcription is grounded in what's printed, far more reliable than a guess)."""
-    ext = path.suffix.lower()
-    b64 = media_type = None
-    if ext == ".pdf":
-        try:
-            import fitz
-            doc = fitz.open(str(path))
-            pix = doc[0].get_pixmap(dpi=120)
-            b64 = base64.standard_b64encode(pix.tobytes("jpeg")).decode()
-            media_type = "image/jpeg"
-            doc.close()
-        except Exception as e:
-            print(f"    PDF render error ({path.name}): {e}")
-            return None, None
-    elif ext in IMAGE_EXTS:
-        media_type = "image/png" if ext == ".png" else "image/jpeg"
-        try:
-            with open(path, "rb") as f:
-                b64 = base64.standard_b64encode(f.read()).decode()
-        except Exception:
-            return None, None
-    else:
+    b64, media_type = _vision_image(path, ai_client)
+    if not b64:
         return None, None
 
     try:
