@@ -1,15 +1,19 @@
 # Client document folders
+_claude_review/
 Alexandra SAS Costa Freitas e Marco Freitas/
 Alexandre Cardiga/
 Ana Jorge/
 Andrea e Luis/
 André Gonçalves/
 Angel e Ana Isabel/
+Antonio e Maria/
+António Vieira/
 Bruno e Elizbieta/
 Carolina e Pedro Pais/
 Catarina Azevedo/
 Daniel Sá Carneiro/
 Danilo Ramalho/
+despesas valencia/
 Eduardo Faria/
 Elismeres e Sebastião/
 Fernanda e Carlos/
@@ -20,25 +24,29 @@ Gonçalo Jorge/
 Guilherme e Marta/
 Ipshita and Ribal/
 Jeferson Silva/
+Jerome e Daniel/
+Joao e Fabiane/
 Joaquim Silva e Nanda/
+José e Maria/
 José Lopes e Paula/
 Júlia Cachinhama/
+Leonel e Vera/
 Luís Salgado/
 Maiana Gonçalves e Paulo Tadeu/
 Maria João Sousa/
 Paulo Macário e Maria Isabel/
 Pedro e Vera/
 Ruben e Zoia/
+Simulacoes Teste/
 Standby/
 Susana Lourenço/
+Susanne de Oliveira/
 Tiago e Dalila/
 Tiago e Patrícia/
 Vanessa e Lucas/
 Vanessa e Marco/
 Victoria Musallam/
-despesas valencia/
-Simulacoes Teste/
-_claude_review/
+Yuri e Eduarda/
 
 # Secrets and database
 webapp/kova.db
