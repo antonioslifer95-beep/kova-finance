@@ -1,72 +1,31 @@
-# Client document folders
-_claude_review/
-Alexandra SAS Costa Freitas e Marco Freitas/
-Alexandre Cardiga/
-Ana Jorge/
-Andrea e Luis/
-André Gonçalves/
-Angel e Ana Isabel/
-Antonio e Maria/
-António Vieira/
-Bruno e Elizbieta/
-Carolina e Pedro Pais/
-Catarina Azevedo/
-Daniel Sá Carneiro/
-Danilo Ramalho/
-despesas valencia/
-Eduardo Faria/
-Elismeres e Sebastião/
-Fernanda e Carlos/
-Fernando e Milena/
-Fátima Campos/
-Gilberto Machado/
-Gonçalo Jorge/
-Guilherme e Marta/
-Ipshita and Ribal/
-Jeferson Silva/
-Jerome e Daniel/
-Joao e Fabiane/
-Joaquim Silva e Nanda/
-José e Maria/
-José Lopes e Paula/
-Júlia Cachinhama/
-Leonel e Vera/
-Luís Salgado/
-Maiana Gonçalves e Paulo Tadeu/
-Maria João Sousa/
-Paulo Macário e Maria Isabel/
-Pedro e Vera/
-Ruben e Zoia/
-Simulacoes Teste/
-Standby/
-Susana Lourenço/
-Susanne de Oliveira/
-Tiago e Dalila/
-Tiago e Patrícia/
-Vanessa e Lucas/
-Vanessa e Marco/
-Victoria Musallam/
-Yuri e Eduarda/
+# This repository is PUBLIC, and the client folders sit beside the code. Each one
+# holds citizen card scans, bank statements, payslips and tax returns for a real
+# person. So nothing is tracked unless it is named here: a client folder added in
+# future is ignored because it was never allowed, not because someone remembered
+# to add it. Allow code only, and never a directory that holds client documents.
+/*
 
-# Secrets and database
+!/.gitignore
+!/README.md
+!/Kova Finance.ps1
+!/organize_kova.py
+!/webapp/
+!/kova-app/
+
+# Secrets and the local database, inside an allowed directory
 webapp/kova.db
 webapp/.secret_key
 
-# Generated files
-organize_plan.json
-claude_review.json
-claude_categorizations.json
-.ocr_cache.sqlite
+# Build artifacts, inside an allowed directory
+kova-app/node_modules/
+kova-app/android/
+kova-app/ios/
 
 # Python
 __pycache__/
 *.pyc
 *.pyo
 
-# Claude Code
-.claude/
-
-# Capacitor / Android app build artifacts
-kova-app/node_modules/
-kova-app/android/
-kova-app/ios/
+# Generated at the project root. Already covered by the rule above; listed so the
+# reason they are absent is obvious.
+# organize_plan.json, claude_review.json, claude_categorizations.json, .ocr_cache.sqlite
