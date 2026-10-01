@@ -377,6 +377,9 @@ Rules:
 - Use _ to separate parts. No spaces. No special chars except - for dates.
 - YYYY-MM = year and month shown in the document (e.g. 2025-11)
 - Person = the person's first name as shown in the dossier (e.g. Tiago, Dalila)
+- A rent receipt is named for the month it covers, shown on it as the period the
+  rent relates to, NOT for the date it was issued. September's rent is commonly
+  receipted in August.
 - Property = which let property the rent document concerns, given to you above when
   the document says. A landlord receives one receipt a month per property, so without
   it the ground floor and the annex of one building look like two months of one let.
@@ -479,8 +482,12 @@ def generate_standard_name(path: Path, category: str, person: Optional[str], ai_
         # left to whether the model remembered to include it. It applies only when
         # the document was named as a rent document: dossiers hold PDFs with a
         # payslip and a rent receipt bound together, and a payslip takes no property.
-        if property_tag and _RENT_NAME_RE.match(new_stem):
-            new_stem = _insert_property_tag(new_stem, property_tag, person)
+        if _RENT_NAME_RE.match(new_stem):
+            rent_period = _rent_period(full_text)
+            if rent_period:
+                new_stem = _force_rent_period(new_stem, rent_period)
+            if property_tag:
+                new_stem = _insert_property_tag(new_stem, property_tag, person)
         new_name = new_stem + ext   # keep original extension
         if new_name == path.name:
             return None             # already has the right name
@@ -1680,6 +1687,60 @@ def _rent_property_tag(text: str) -> Optional[str]:
     return tag or None
 
 
+_DATE_RE = re.compile(r"\b(20\d{2})-(\d{2})-(\d{2})\b")
+# A month inside a filename. No word boundaries: an underscore counts as a word
+# character, so \b never fires against the separator these names are built from.
+# The lookahead keeps a full date out, and the compact form is matched too,
+# because some names were built as ReciboRenda_202602_...
+_MONTH_TOKEN_RE = re.compile(r"(?<!\d)20\d{2}-\d{2}(?!-?\d)")
+_COMPACT_MONTH_TOKEN_RE = re.compile(r"(?<!\d)20\d{2}(?:0[1-9]|1[0-2])(?!\d)")
+
+
+def _rent_period(text: str) -> Optional[str]:
+    """
+    The month a rent receipt is for, as YYYY-MM, read from the period it states.
+
+    A receipt is issued before the month it covers, so naming it by its issue date
+    is wrong and, worse, collides: September's receipt for one tenancy was issued in
+    August and came out sharing August's name. The period is found as a pair of
+    dates running from the first of a month to that month's last day, which is what
+    a monthly tenancy always prints. Anything else returns None and the model decides.
+    """
+    if not text:
+        return None
+    import calendar
+    dates = []
+    for y, m, d in _DATE_RE.findall(text):
+        try:
+            dates.append((int(y), int(m), int(d)))
+        except ValueError:
+            continue
+    months = set()
+    for (y1, m1, d1) in dates:
+        if d1 != 1:
+            continue
+        last = calendar.monthrange(y1, m1)[1]
+        if (y1, m1, last) in dates:
+            months.add(f"{y1:04d}-{m1:02d}")
+    return months.pop() if len(months) == 1 else None
+
+
+def _force_rent_period(stem: str, period: str) -> str:
+    """Put the stated rent month into a filename, replacing a single wrong one."""
+    found = _MONTH_TOKEN_RE.findall(stem)
+    if len(found) > 1:
+        return stem                      # a range the model built; leave it alone
+    if found:
+        return stem.replace(found[0], period, 1)
+    compact = _COMPACT_MONTH_TOKEN_RE.findall(stem)
+    if len(compact) > 1:
+        return stem
+    if compact:
+        return stem.replace(compact[0], period, 1)
+    parts = stem.split("_")
+    return "_".join(parts[:1] + [period] + parts[1:]) if len(parts) > 1 else f"{stem}_{period}"
+
+
 def _insert_property_tag(stem: str, tag: str, person: Optional[str]) -> str:
     """Put the property into a filename, keeping any person suffix last."""
     if not tag or normalize_stem(tag) in normalize_stem(stem):
@@ -1707,7 +1768,10 @@ def _name_needs_revisit(path: Path, category: str) -> bool:
     if not _is_rent_document(text):
         return False
     tag = _rent_property_tag(text)
-    return bool(tag) and normalize_stem(tag) not in normalize_stem(path.stem)
+    if tag and normalize_stem(tag) not in normalize_stem(path.stem):
+        return True
+    period = _rent_period(text)
+    return bool(period) and period not in path.stem
 
 
 def _strip_person_suffix(stem: str, person_names: List[str]) -> str:
