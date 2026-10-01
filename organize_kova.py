@@ -219,7 +219,7 @@ IMAGE_EXTS = {".jpg", ".jpeg", ".png"}
 
 CATEGORY_RULES: Dict[str, List[str]] = {
     "Rendimentos": [
-        r"^RecVenc_", r"^DeclPatronal_", r"^ContratoTrabalho_",
+        r"^RecVenc_", r"^DeclPatronal_", r"^ContratoTrabalho_", r"^RegistoArrendamento_",
         r"^DeclInternaPag", r"^DeclSocioGerente_", r"^DeclSubsidio",
         r"^FaturaAL_", r"^FaturaNegocios_", r"^RecibosVenc",
         r"^FaturaRecibo_", r"^ReciboVerde_", r"^ReciboRenda_", r"^ReciboAvenca_",
@@ -275,6 +275,7 @@ RENAME_PROMPT = """\
 This is a page from a Portuguese mortgage dossier.
 Category folder: {category}
 {person_line}
+{property_line}
 
 Document text (all pages, truncated):
 {text_context}
@@ -290,7 +291,9 @@ Rendimentos:
   salary declaration            →  DeclInternaPagSalarial_Person
   freelance invoice-receipt (recibo verde / fatura-recibo)  →  FaturaRecibo_YYYY-MM_Person
   AT portal listing of issued fatura-recibo over a period    →  ReciboVerde_YYYY-MM_YYYY-MM_Person
-  rent receipt (recibo de renda) →  ReciboRenda_YYYY-MM_Person
+  rent receipt (recibo de renda) →  ReciboRenda_YYYY-MM_Property_Person
+  AT lease registration (Comunicacao de Contratos de Arrendamento, Modelo 2)
+                                 →  RegistoArrendamento_Property
   avença / nota discriminativa dos atos clínicos (contrato de avença)  →  ReciboAvenca_YYYY-MM_Person
   payslip from a "Boletim de Vencimentos" template  →  RecVenc_YYYY-MM_Person  (same as any other payslip)
 
@@ -374,6 +377,9 @@ Rules:
 - Use _ to separate parts. No spaces. No special chars except - for dates.
 - YYYY-MM = year and month shown in the document (e.g. 2025-11)
 - Person = the person's first name as shown in the dossier (e.g. Tiago, Dalila)
+- Property = which let property the rent document concerns, given to you above when
+  the document says. A landlord receives one receipt a month per property, so without
+  it the ground floor and the annex of one building look like two months of one let.
 - BankName = short name of the bank/institution
 - If a detail is not visible, omit that part
 - Multi-period documents: if the file contains more than one period (e.g. two payslips,
@@ -405,6 +411,10 @@ def _sanitize_stem(raw: str) -> Optional[str]:
     # Remove extension if AI accidentally included it
     if '.' in s:
         s = s.rsplit('.', 1)[0]
+    # The model is told to leave a name out when it cannot read one; some replies
+    # write UNKNOWN in its place instead, and it then sticks to the file for good.
+    s = "_".join(t for t in s.split("_")
+                 if t and t.lower() not in {"unknown", "desconhecido", "na", "none"})
     s = s.strip()
     if not s:
         return None
@@ -431,13 +441,22 @@ def generate_standard_name(path: Path, category: str, person: Optional[str], ai_
 
     person_line = (
         f"Person: {person}" if person
-        else "Person: UNKNOWN — do NOT guess or include any name (even a partial one) in the filename."
+        else "Person: not known — do NOT guess, and do NOT write a placeholder such as "
+             "UNKNOWN. Leave the name out of the filename entirely."
     )
     full_text = document_text(path, ai_client)
+    # Only rent documents get a property: a payslip naming the employer's street
+    # has an address too, and it identifies nothing.
+    property_tag = _rent_property_tag(full_text) if _is_rent_document(full_text) else None
+    property_line = (
+        f"Property: {property_tag}  (include this in the filename exactly as written)"
+        if property_tag else "Property: not applicable"
+    )
     text_context = full_text[:4000].strip() if full_text else "(no text layer — image scan)"
     prompt = RENAME_PROMPT.format(
         category=category,
         person_line=person_line,
+        property_line=property_line,
         text_context=text_context,
     )
     try:
@@ -456,6 +475,12 @@ def generate_standard_name(path: Path, category: str, person: Optional[str], ai_
         new_stem = _sanitize_stem(raw_stem)
         if not new_stem:
             return None
+        # Telling two tenancies apart is the whole point of the name, so this is not
+        # left to whether the model remembered to include it. It applies only when
+        # the document was named as a rent document: dossiers hold PDFs with a
+        # payslip and a rent receipt bound together, and a payslip takes no property.
+        if property_tag and _RENT_NAME_RE.match(new_stem):
+            new_stem = _insert_property_tag(new_stem, property_tag, person)
         new_name = new_stem + ext   # keep original extension
         if new_name == path.name:
             return None             # already has the right name
@@ -574,6 +599,9 @@ VISION_PROMPT = (
     "fiscal domicile, debt-free certificates CertNaoDivida, career history CarreiraContributiva, "
     "disability certificate AMIM / Atestado Médico de Incapacidade Multiúso)\n"
     "- Rendimentos (payslip RecVenc / Boletim de Vencimentos, employer declaration DeclPatronal, "
+    "the AT lease registration form Comunicacao de Contratos de Arrendamento (Modelo 2) "
+    "and the electronic rent receipt Recibo de Renda — the applicant is the landlord "
+    "collecting the rent, so these are income, not a bank form, however box-ruled they look, "
     "work contract ContratoTrabalho, income declarations, freelance invoice-receipt "
     "recibo verde / fatura-recibo, rent receipt recibo de renda, "
     "an AT portal \"Faturas e Recibos\" screen listing issued FATURA-RECIBO documents "
@@ -645,6 +673,12 @@ CONTENT_RULES: Dict[str, List[str]] = {
     "Rendimentos": [
         r"boletim de vencimentos", r"recibo de vencimentos",
         r"nota discriminativa.*atos clinicos", r"contrato de avenca",
+        # The AT form registering a lease (Modelo 2) and the electronic rent
+        # receipt. An applicant who lets property is the landlord here, so both
+        # evidence income. The form is a grid of boxes and was being read as a
+        # bank credit form by sight alone.
+        r"comunicacao de contratos? arrendamento",
+        r"recibo de renda eletronico",
     ],
     "IRS": [
         # Portuguese IRS documents (born-digital PDFs from AT portal).
@@ -1561,6 +1595,121 @@ def is_joint_document(path: Path, person_names: List[str],
     return False
 
 
+# A landlord with several let properties gets a rent receipt a month for each, and
+# they are told apart only by the property. Receipts for the ground floor and for the
+# annex of one building, named by month alone, read as two months of the same tenancy.
+_STREET_RE = re.compile(
+    r"\b(?:rua|avenida|av|travessa|praceta|praca|largo|estrada|beco|calcada|"
+    r"azinhaga|quinta|urbanizacao|bairro|alameda|caminho)\b[\s.]+(.{3,60})",
+    re.IGNORECASE)
+
+# Words that carry no distinguishing weight in a street name.
+_STREET_STOPWORDS = {"do", "da", "de", "dos", "das", "e"}
+
+# How the part of a building that was let is written on these forms.
+_PROPERTY_PART_RE = re.compile(
+    r"\b(res\s*do\s*chao|r/c|rcesq|rcdto|anexo|cave|sotao|aguas furtadas|loja|"
+    r"garagem|arrecadacao|armazem|\d\s*(?:esq|dto|dir|frente|tras|frt))\b",
+    re.IGNORECASE)
+
+
+def _camel(text: str) -> str:
+    """Filename-safe CamelCase of a few words."""
+    parts = [w for w in re.split(r"[^0-9a-z]+", normalize_stem(text)) if w]
+    return "".join(w.capitalize() for w in parts)
+
+
+# Only the two documents that are themselves about one tenancy, matched on their own
+# headings. A passing mention is not enough: "contrato de arrendamento" turns up in
+# the IRS Anexo F, in bank forms and in dossier summaries, and treating those as rent
+# documents gave them property names taken from whatever address they happened to
+# quote. The word "anexo" alone is worse still, being how every Portuguese form
+# labels its attachments and its schedules.
+_RENT_DOC_RE = re.compile(
+    r"recibo de renda eletronico|comunicacao de contratos? arrendamento",
+    re.IGNORECASE)
+
+
+# The filename prefixes that denote a document about one tenancy.
+_RENT_NAME_RE = re.compile(r"^(ReciboRenda|RecRenda|RegistoArrendamento)_", re.IGNORECASE)
+
+
+def _is_rent_document(text: str) -> bool:
+    """True for a rent receipt or a lease registration, where the property matters."""
+    return bool(text) and bool(_RENT_DOC_RE.search(normalize_stem(text)))
+
+
+def _rent_property_tag(text: str) -> Optional[str]:
+    """
+    A short label for the property a rent document concerns, from its street name
+    and the part of the building let: 'Morangueiros_ResChao'. None when the document
+    does not say, in which case naming carries on without it rather than guessing.
+    """
+    if not text:
+        return None
+    norm = normalize_stem(text)
+
+    street = None
+    m = _STREET_RE.search(norm)
+    if m:
+        # Keep the distinctive words of the name, stopping at the house number.
+        words = []
+        for w in re.split(r"[^0-9a-z]+", m.group(1)):
+            if not w or w in _STREET_STOPWORDS:
+                continue
+            if w.isdigit() or w in {"n", "no", "numero"}:
+                break
+            words.append(w)
+            if len(words) == 3:
+                break
+        if words:
+            street = _camel(" ".join(words))
+
+    part = None
+    labelled = re.search(r"parte arrendada[^\n]*\n?\s*([^\n]{1,40})", text, re.IGNORECASE)
+    if labelled:
+        candidate = labelled.group(1).strip()
+        if candidate and ":" not in candidate:
+            part = _camel(candidate)
+    if not part:
+        found = _PROPERTY_PART_RE.search(norm)
+        if found:
+            part = _camel(found.group(1))
+
+    tag = "_".join(x for x in (street, part) if x)
+    return tag or None
+
+
+def _insert_property_tag(stem: str, tag: str, person: Optional[str]) -> str:
+    """Put the property into a filename, keeping any person suffix last."""
+    if not tag or normalize_stem(tag) in normalize_stem(stem):
+        return stem
+    parts = stem.split("_")
+    if person and parts and normalize_stem(parts[-1]) == normalize_stem(person):
+        return "_".join(parts[:-1] + [tag, parts[-1]])
+    return f"{stem}_{tag}"
+
+
+# Names that pass the convention check but are still missing something. A standard
+# prefix is normally reason enough to leave a filename alone, which is why a rent
+# receipt named by month only was never revisited to gain its property.
+_PLACEHOLDER_TOKENS = {"unknown", "desconhecido", "na", "none"}
+
+
+def _name_needs_revisit(path: Path, category: str) -> bool:
+    """Whether an otherwise-conventional filename is still worth regenerating."""
+    stem_tokens = {t.lower() for t in path.stem.split("_") if t}
+    if stem_tokens & _PLACEHOLDER_TOKENS:
+        return True
+    if category != "Rendimentos" or not _RENT_NAME_RE.match(path.stem):
+        return False
+    text = document_text(path)
+    if not _is_rent_document(text):
+        return False
+    tag = _rent_property_tag(text)
+    return bool(tag) and normalize_stem(tag) not in normalize_stem(path.stem)
+
+
 def _strip_person_suffix(stem: str, person_names: List[str]) -> str:
     """Drop trailing _Person parts from the name of a file that turned out to be joint."""
     pats = [pat for name in person_names for pat in _name_patterns(normalize_stem(name))]
@@ -2189,7 +2338,7 @@ def _plan_renames(plan: Dict, client_folder: Path, all_subclients: List[Path], a
             return
         if source_path.suffix.lower() not in {e.lower() for e in VISION_EXTS}:
             return
-        if _is_standard_name(source_path.stem, category=category):
+        if _is_standard_name(source_path.stem, category=category) and not _name_needs_revisit(source_path, category):
             return
         print(f"    [rename] {source_path.name}")
         new_name = generate_standard_name(source_path, category, person, ai_client)
